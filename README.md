@@ -2,4 +2,8 @@
 
 # otto
 
-Created in [T3 Code](https://t3.codes).
+Otto is an engine trained to play competitive modern Tetris. 
+
+You can play against it here: 
+
+xxx

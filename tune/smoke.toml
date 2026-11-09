@@ -1,0 +1,27 @@
+# Smoke config: proves the pipeline end to end (CMA-ES, pool, checkpoints, eval, oracle dump, resume)
+# in a few minutes on a laptop. Not a real tune: tiny population, few seeds, short games, narrow beam.
+#   cargo run --release -p tetris-cli -- tune --config tune/smoke.toml
+out = "runs/smoke"
+seed = 1
+start = "default"
+generations = 4
+population = 8
+sigma0 = 0.12
+pairs = 1
+width = 8
+fixed = ["default", "steady", "greedy-app"]
+include_mean = true
+checkpoint_every = 2
+pool_recent = 2
+eval_every = 2
+eval_pairs = 4
+oracle_every = 2
+threads = 0
+
+[conditions]
+pps = [2.0, 3.0]
+tl_fraction = 0.5
+garbage_speed = [10, 30]
+messiness_change = [0.5, 1.0]
+messiness_within = [0.0, 0.3]
+max_pieces = 400

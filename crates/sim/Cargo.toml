@@ -1,0 +1,32 @@
+[package]
+name = "tetris-sim"
+description = "Rules-exact TETR.IO Season 2 versus simulator core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "tetris_sim"
+
+[features]
+default = ["replay"]
+# Oracle trace replayer + diff (pulls in serde/serde_json; the hot path never touches it).
+replay = ["dep:serde", "dep:serde_json"]
+
+[dependencies]
+smallvec = { workspace = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[[bench]]
+name = "apply_placement"
+harness = false
+
+[[bench]]
+name = "movegen"
+harness = false
+
+[dev-dependencies]
+criterion = { workspace = true }
+serde_json = { workspace = true }

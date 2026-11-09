@@ -1,0 +1,26 @@
+[package]
+name = "tetris-bot"
+description = "The engine: beam search over placements, a hand-written evaluation with a burst/reserve release controller, and an NNUE value network"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "tetris_bot"
+
+[dependencies]
+tetris-sim = { path = "../sim", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "bot_move"
+harness = false
+
+[[bench]]
+name = "nnue_eval"
+harness = false

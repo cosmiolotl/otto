@@ -1,0 +1,32 @@
+# The M5 tuning run (docs/SELFPLAY.md): ~1M games on one 64-core machine (c8g.16xlarge).
+#   sim tune --config tune/m5.toml          (rerun the same command to resume)
+#   touch runs/m5/STOP                      (stop cleanly after the current generation)
+#
+# Per generation: 24 candidates x 7 pool members x 6 seed pairs x 2 seatings = 2,016 games.
+# Pool: untuned default, steady, greedy-app, the 3 most recent checkpoints of the mean, the current mean.
+# Width 32 for tuning (about 1/3 the cost of width 96); the result is checked at width 96 afterwards.
+out = "runs/m5"
+seed = 5
+start = "default"
+generations = 600
+max_games = 1_000_000
+population = 24
+sigma0 = 0.12
+pairs = 6
+width = 32
+fixed = ["default", "steady", "greedy-app"]
+include_mean = true
+checkpoint_every = 25
+pool_recent = 3
+eval_every = 20
+eval_pairs = 100
+oracle_every = 50
+threads = 0
+
+[conditions]
+pps = [2.0, 3.0]
+tl_fraction = 0.5
+garbage_speed = [10, 30]
+messiness_change = [0.5, 1.0]
+messiness_within = [0.0, 0.3]
+max_pieces = 2000

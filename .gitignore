@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / Bun
+node_modules/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Scripts to interact with AWS & Modal
+/cloud/
+
+# Testing/verification utilities
+/runs/
+/replays/
+/oracle/
+/traces/
+
+
+# @TODO write formal docs
+/docs/

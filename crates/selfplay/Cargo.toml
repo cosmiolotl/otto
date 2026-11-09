@@ -1,0 +1,19 @@
+[package]
+name = "tetris-selfplay"
+description = "Self-play: the game runner, head-to-head matches, tournaments with Bradley-Terry ratings, the CMA-ES weight tuner, and value-network training data"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "tetris_selfplay"
+
+[dependencies]
+tetris-sim = { path = "../sim" }
+tetris-bot = { path = "../bot" }
+serde = { workspace = true }
+# float_roundtrip: CMA-ES checkpoints must parse back to the exact f64s (bit-for-bit resume).
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+rayon = { workspace = true }
+toml = "0.8"

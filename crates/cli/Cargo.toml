@@ -1,0 +1,17 @@
+[package]
+name = "tetris-cli"
+description = "The `sim` command-line tool: oracle replay and diff, movegen tools, bot matches, tuning, tournaments, value-network data"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sim"
+path = "src/main.rs"
+
+[dependencies]
+tetris-sim = { path = "../sim" }
+tetris-bot = { path = "../bot" }
+tetris-selfplay = { path = "../selfplay" }
+serde_json = { workspace = true }

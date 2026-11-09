@@ -1,0 +1,37 @@
+[project]
+name = "otto-nnue"
+version = "0.1.0"
+description = "Trainer for Otto's NNUE-style value network (docs/NNUE.md)"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+# Pick one: `uv run --extra cu128 ...` on an NVIDIA GPU, `uv run --extra cpu ...` elsewhere.
+cpu = ["torch>=2.5"]
+cu128 = ["torch>=2.5"]
+
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "cu128" }]]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu128", extra = "cu128" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["otto_nnue"]
