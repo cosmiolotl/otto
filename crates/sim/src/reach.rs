@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 
 use crate::board::Board;
 use crate::falling::{Falling, Spin};
-use crate::piece::{Piece, Rotation};
+use crate::piece::Rotation;
 use crate::state::{Key, Placement, PlayerState};
 
 /// One reachable final placement and a shortest key sequence (ending in `HardDrop`) that produces it.
@@ -119,7 +119,6 @@ fn bfs(board: &Board, start: Falling, start_spin: Spin, hold: bool, moves: &[Key
     let mut seen_cells: Vec<([(i8, i8); 4], Spin)> = Vec::new();
     while let Some(i) = q.pop_front() {
         let (f, spin) = node[i].unwrap();
-        // Hard drop from here.
         let mut d = f;
         let fell = d.sonic_drop(board);
         let fspin = if fell { Spin::None } else { spin };
@@ -197,9 +196,4 @@ pub fn reachable_with(state: &PlayerState, opts: ReachOpts, hold: bool) -> Vec<R
         }
     }
     v
-}
-
-/// Convenience: every distinct placement of `piece` from its spawn on `board`.
-pub fn reachable_piece(board: &Board, piece: Piece) -> Vec<Reachable> {
-    reachable_from(board, Falling::spawn(piece), Spin::None, false)
 }

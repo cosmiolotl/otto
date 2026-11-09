@@ -29,7 +29,7 @@ pub fn bot_vs_bot(args: &Args) -> CmdResult {
     let b = BotSpec::load(args.get("--b").unwrap_or("default"), opts_b)?;
     let games: usize = args.num("--games", 100)?;
     let seed: u64 = args.num("--seed", 1)?;
-    let max_pieces: u32 = args.num("--max-pieces", 2000)?;
+    let max_pieces: u32 = args.num("--max-pieces", crate::args::MAX_PIECES)?;
     let jitter: u32 = args.num("--jitter", 1)?;
     let fpp = args.pair("--pps", [2.5, 2.5])?.map(fpp_of_pps);
     let dump_dir = args.get("--dump-requests");

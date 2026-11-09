@@ -128,22 +128,18 @@ impl Evaluator for AnyEval {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tetris_sim::Board;
+    use tetris_sim::{Board, Piece};
 
     #[test]
     fn path_acc_counts_breaks_only_with_an_active_chain() {
-        let mut s = PlayerState::tl(1);
-        s.board = Board::from_ascii("#########.");
         // An I clears a single: no chain before, so no break; then the same with b2b 5 releases surge.
-        let mut buf = Vec::new();
-        tetris_sim::movegen::generate(&s, Default::default(), &mut buf);
         let mut fresh = PlayerState::tl(1);
-        fresh.board = s.board;
-        let p = buf.iter().copied().find(|p| {
-            let mut c = fresh.clone();
-            c.apply_placement(*p).lines == 1
-        });
-        let Some(p) = p else { return }; // current piece can't clear (seed-dependent)
+        fresh.board = Board::from_ascii("#########.");
+        fresh.falling = fresh.spawn_falling(Piece::I).0;
+        let mut buf = Vec::new();
+        tetris_sim::movegen::generate(&fresh, Default::default(), &mut buf);
+        let p =
+            buf.iter().copied().find(|p| fresh.clone().apply_placement(*p).lines == 1).expect("I clears the single");
         let mut a = PathAcc::default();
         let mut c = fresh.clone();
         let out = c.apply_placement(p);

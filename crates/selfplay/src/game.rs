@@ -7,10 +7,10 @@
 //! oracle request (pathfinder keys), which replays to the same game in the simulator and in triangle.js.
 
 use serde::{Deserialize, Serialize};
-use tetris_bot::{BotSpec, BotStats, Decision, Mode, Observation};
+use tetris_bot::{BotSpec, BotStats, Decision, GEN_MODE, Mode, Observation};
 use tetris_sim::movegen::{self, GenOptions, Pathfinder};
 use tetris_sim::replay::{Request, RequestBuilder};
-use tetris_sim::{Config, Match, MatchResult, Stats};
+use tetris_sim::{Config, Match, Stats};
 
 /// Frames between two attacking placements that still count as one spike (1 s at 60 fps).
 pub const SPIKE_WINDOW: u32 = 60;
@@ -108,13 +108,12 @@ pub fn play_game_with(spec: &GameSpec, mut on_move: impl FnMut(&Match, usize, &D
                 spec.seed, real.stats.pieces, d.placement
             );
         }
-        let gen_mode = spec.bots[p].opts.gen_mode;
         buf.clear();
-        movegen::generate(real, GenOptions::new(gen_mode, true), &mut buf);
+        movegen::generate(real, GenOptions::new(GEN_MODE, true), &mut buf);
         assert!(buf.contains(&d.placement), "seed {} player {p}: placement not in movegen output", spec.seed);
         if let Some((pf, req)) = recording.as_mut() {
             keys.clear();
-            assert!(pf.find(real, &d.placement, gen_mode, &mut keys), "no path");
+            assert!(pf.find(real, &d.placement, GEN_MODE, &mut keys), "no path");
             req.tick_to(m.frame);
             req.keys(p, &keys);
         }
@@ -151,10 +150,7 @@ pub fn play_game_with(spec: &GameSpec, mut on_move: impl FnMut(&Match, usize, &D
     GameResult {
         seed: spec.seed,
         fpp: spec.fpp,
-        winner: match m.result {
-            Some(MatchResult::Win(w)) => Some(w),
-            _ => None,
-        },
+        winner: m.winner,
         loss,
         frames: m.frame,
         stats: [m.players[0].stats, m.players[1].stats],

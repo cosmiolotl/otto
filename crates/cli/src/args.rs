@@ -2,6 +2,8 @@
 
 use std::str::FromStr;
 
+use tetris_selfplay::Conditions;
+
 pub enum CliError {
     /// Bad or missing arguments: print the usage.
     Usage(String),
@@ -73,6 +75,21 @@ impl<'a> Args<'a> {
         }
     }
 }
+
+/// Match conditions from `--pps lo,hi` (default `pps`), `--varied` (vary the rules in part of the pairs as
+/// [`Conditions::default`] does; otherwise exact TL rules) and `--max-pieces`.
+pub fn conditions(args: &Args, pps: [f64; 2]) -> Result<Conditions, CliError> {
+    let varied = Conditions::default();
+    Ok(Conditions {
+        pps: args.pair("--pps", pps)?,
+        tl_fraction: if args.has("--varied") { varied.tl_fraction } else { 1.0 },
+        max_pieces: args.num("--max-pieces", MAX_PIECES)?,
+        ..varied
+    })
+}
+
+/// Default total placements before a game is a draw, for every command.
+pub const MAX_PIECES: u32 = 2000;
 
 fn bad_pair(name: &str, s: &str) -> CliError {
     usage_error(format!("{name} {s}: expected one number or two separated by a comma"))

@@ -1,0 +1,9 @@
+<svg role="img" aria-label="OTTO" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 34">
+  <rect width="144" height="34" rx="6.8" fill="#0f172a"/>
+  <path d="M8.8 8.8L25.2 8.8L25.2 25.2L8.8 25.2Z" fill="#34d399" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round"/>
+  <rect x="13" y="13" width="8" height="8" rx="1.6" fill="#0f172a"/>
+  <path d="M38.8 8.8L65.2 8.8L65.2 15.2L55.2 15.2L55.2 25.2L48.8 25.2L48.8 15.2L38.8 15.2Z" fill="#f8fafc" stroke="#f8fafc" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M78.8 8.8L105.2 8.8L105.2 15.2L95.2 15.2L95.2 25.2L88.8 25.2L88.8 15.2L78.8 15.2Z" fill="#f8fafc" stroke="#f8fafc" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M118.8 8.8L135.2 8.8L135.2 25.2L118.8 25.2Z" fill="#34d399" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round"/>
+  <rect x="123" y="13" width="8" height="8" rx="1.6" fill="#0f172a"/>
+</svg>

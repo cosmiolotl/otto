@@ -24,6 +24,7 @@
 pub mod bot;
 pub mod controller;
 pub mod eval;
+mod hash;
 pub mod nnue;
 pub mod obs;
 pub mod search;
@@ -33,7 +34,8 @@ pub mod weights;
 pub use bot::{Bot, BotStats, Decision};
 pub use controller::{Mode, Plan, Threat};
 pub use eval::{AnyEval, Evaluator, HandEval, NnueEval, PathAcc};
+pub use hash::state_hash;
 pub use obs::{Observation, PlayerView};
-pub use search::{DEFAULT_WIDTH, Search, SearchOptions};
+pub use search::{DEFAULT_WIDTH, GEN_MODE, Search, SearchOptions};
 pub use spec::{BotSpec, EvalSpec};
 pub use weights::Weights;

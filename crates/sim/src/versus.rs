@@ -7,15 +7,7 @@
 
 use crate::config::Config;
 use crate::garbage::IncomingGarbage;
-use crate::state::{Key, LockObserver, LockOutcome, Placement, PlayerState};
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum MatchResult {
-    /// Player `p` won (the other topped out).
-    Win(usize),
-    /// No winner (e.g. a piece limit was reached; set by match runners, never by [`Match`] itself).
-    Draw,
-}
+use crate::state::{Key, LockOutcome, Placement, PlayerState};
 
 #[derive(Clone, Debug)]
 pub struct Match {
@@ -25,9 +17,10 @@ pub struct Match {
     pub frames_per_piece: [u32; 2],
     /// Frame of each player's next lock.
     pub next_lock: [u32; 2],
-    /// Last cid handed out (the next item gets `next_cid + 1`).
+    /// Last cid handed out (the next item gets `last_cid + 1`).
     pub last_cid: u32,
-    pub result: Option<MatchResult>,
+    /// Set when a player tops out: the other player.
+    pub winner: Option<usize>,
 }
 
 impl Match {
@@ -41,7 +34,7 @@ impl Match {
             frames_per_piece,
             next_lock: frames_per_piece,
             last_cid: 0,
-            result: None,
+            winner: None,
         }
     }
 
@@ -51,7 +44,7 @@ impl Match {
 
     #[inline]
     pub fn is_over(&self) -> bool {
-        self.result.is_some()
+        self.winner.is_some()
     }
 
     /// Advance both players to `frame` (must not be in the past).
@@ -90,34 +83,25 @@ impl Match {
     /// Player `p` locks `placement` now: apply, route the sent events, schedule the next lock and check
     /// for top-out.
     pub fn play(&mut self, p: usize, placement: Placement) -> LockOutcome {
-        self.play_with(p, placement, &mut ())
-    }
-
-    pub fn play_with<O: LockObserver>(&mut self, p: usize, placement: Placement, obs: &mut O) -> LockOutcome {
-        let out = self.players[p].apply_placement_with(placement, obs);
+        let out = self.players[p].apply_placement(placement);
         self.after_lock(p, &out);
         out
     }
 
     /// Player `p` presses `keys` now (like `press()`, up to the first `HardDrop`). Returns `None` if the
     /// keys contain no `HardDrop` (the presses still happen).
-    pub fn play_keys_with<O: LockObserver>(&mut self, p: usize, keys: &[Key], obs: &mut O) -> Option<LockOutcome> {
-        let out = self.players[p].apply_keys_with(keys, obs)?;
+    pub fn play_keys(&mut self, p: usize, keys: &[Key]) -> Option<LockOutcome> {
+        let out = self.players[p].apply_keys(keys)?;
         self.after_lock(p, &out);
         Some(out)
     }
 
-    pub fn play_keys(&mut self, p: usize, keys: &[Key]) -> Option<LockOutcome> {
-        self.play_keys_with(p, keys, &mut ())
-    }
-
-    /// Bookkeeping after player `p` locked (by placement or keys) at the current frame.
-    pub fn after_lock(&mut self, p: usize, out: &LockOutcome) {
+    fn after_lock(&mut self, p: usize, out: &LockOutcome) {
         self.route(p, out.sent.as_slice());
         self.next_lock[p] = self.frame + self.frames_per_piece[p];
         if out.topout {
             // The match ends at once: an opponent lock scheduled for the same frame never happens.
-            self.result = Some(MatchResult::Win(1 - p));
+            self.winner = Some(1 - p);
         }
     }
 }

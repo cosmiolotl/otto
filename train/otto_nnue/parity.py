@@ -32,9 +32,13 @@ def main(argv=None) -> int:
         return 1
     out = subprocess.run([args.sim, "nnue-eval", "--net", args.net, "--data", args.data, "--n", str(args.n)],
                          check=True, capture_output=True, text=True).stdout.split("\n")
-    rust = [int(line.split()[3]) for line in out if line.strip()]
+    rows = [line.split() for line in out if line.strip()]
+    rust = {int(c[0]): int(c[3]) for c in rows}  # `index bucket result raw logit`
+    if sorted(rust) != list(range(min(args.n, len(ds)))):
+        print(f"sim nnue-eval returned samples {sorted(rust)[:5]}..., expected 0..{min(args.n, len(ds))}")
+        return 1
     bad = 0
-    for i, r in enumerate(rust):
+    for i, r in rust.items():
         want = reference_eval(q, *ds.sample(i))
         if want != r:
             bad += 1

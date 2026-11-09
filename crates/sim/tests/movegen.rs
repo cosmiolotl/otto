@@ -403,7 +403,6 @@ fn placement_equals_keys_in_games() {
                 assert_eq!(a.apply_placement(*p), b.apply_keys(&keys).unwrap());
                 assert_eq!(a, b);
             }
-            // Play a low placement.
             let p = *v.iter().min_by_key(|p| (p.y, rng.below(5))).unwrap();
             if s.apply_placement(p).topout {
                 break;
@@ -437,7 +436,7 @@ fn tsd_slot_is_normal() {
 }
 
 #[test]
-fn t_on_flat_ground_has_none_and_maybe_spins() {
+fn t_on_flat_ground_has_no_spin() {
     let b = Board::new();
     let s = spins_at(&b, Piece::T, Mode::Sonic, &[(3, 0), (4, 0), (5, 0), (4, 1)]);
     assert_eq!(s, BTreeSet::from([Spin::None]));

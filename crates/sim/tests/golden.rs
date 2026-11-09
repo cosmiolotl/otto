@@ -17,10 +17,11 @@ fn check_dir(dir: &Path, label: &str) -> Option<(usize, usize)> {
             eprintln!("[{label}] SKIPPED: {} contains no *.json traces", dir.display());
             return None;
         }
-        Err(_) => {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             eprintln!("[{label}] SKIPPED: {} does not exist", dir.display());
             return None;
         }
+        Err(e) => panic!("[{label}] {}: {e}", dir.display()),
     };
     let mut failures = Vec::new();
     let mut placements = 0;

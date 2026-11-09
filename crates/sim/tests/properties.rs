@@ -2,7 +2,7 @@
 //! versus matches, and `apply_placement` ≡ `apply_keys` for every reachable placement.
 
 use tetris_sim::reach::{Reachable, reachable};
-use tetris_sim::{IncomingGarbage, Match, MatchResult, PlayerState};
+use tetris_sim::{IncomingGarbage, Match, PlayerState};
 
 struct Lcg(u64);
 impl Lcg {
@@ -48,7 +48,6 @@ fn cell_conservation_and_no_overlap() {
             let n0 = before.cell_count() as i64;
             let tall = before.top() >= 34;
             let out = s.apply_placement(r.placement);
-            // No overlap: every placed cell was empty.
             for &(x, y) in &out.cells {
                 assert!(!before.get(x as usize, y as usize), "overlap at ({x},{y})");
             }
@@ -119,13 +118,12 @@ fn versus_garbage_accounting() {
                 let spent = sender.stats.attack - sender.stats.sent;
                 assert!(sender.stats.garbage_cancelled >= spent && sender.stats.garbage_cancelled <= 2 * spent);
             }
-            // Both clocks in lockstep.
             assert_eq!(m.players[0].frame, m.players[1].frame);
             if n > 600 {
                 break;
             }
         }
-        if let Some(MatchResult::Win(w)) = m.result {
+        if let Some(w) = m.winner {
             assert!(m.players[1 - w].topped_out);
             finished += 1;
         }

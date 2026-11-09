@@ -10,8 +10,9 @@ use tetris_sim::movegen::{self, GenOptions};
 use tetris_sim::{PREVIEW, Placement, PlayerState, SplitMix};
 
 use crate::eval::board::board_features;
+use crate::hash::{PassThrough, state_hash};
 use crate::obs::PlayerView;
-use crate::search::{PassThrough, state_hash};
+use crate::search::GEN_MODE;
 
 #[derive(Debug, Default)]
 pub struct Burst {
@@ -50,7 +51,7 @@ impl Burst {
 
     /// The sub-search on a state (no cache).
     pub fn run(&mut self, s: &PlayerState, k: usize, width: usize, fpp: u32) -> f32 {
-        let gopts = GenOptions::new(movegen::Mode::Sonic, true);
+        let gopts = GenOptions::new(GEN_MODE, true);
         self.beam.clear();
         self.beam.push((s.clone(), 0.0, 0.0));
         let mut best = 0.0f32;

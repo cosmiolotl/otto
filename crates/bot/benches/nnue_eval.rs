@@ -58,7 +58,7 @@ fn bench(c: &mut Criterion) {
     g.bench_function("extract", |b| {
         b.iter(|| {
             let mut f = Features::default();
-            extract(black_box(&st[i % st.len()]), 24, 0, &mut f);
+            extract(black_box(&st[i % st.len()]), 24, &mut f);
             i += 1;
             black_box(f.len)
         })

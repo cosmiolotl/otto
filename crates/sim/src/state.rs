@@ -275,7 +275,6 @@ impl PlayerState {
             }
             return;
         }
-        // Blocked out (the piece stays at its spawn position, overlapping).
         self.ihs_flag = !self.ihs_flag;
     }
 
@@ -289,7 +288,6 @@ impl PlayerState {
             return (f, true);
         }
         if self.last_was_clear && self.cfg.clutch {
-            // Clutch: move up one row at a time while floor(y) < fullHeight.
             let y0 = f.y;
             while (f.y as usize) < crate::board::BOARD_HEIGHT {
                 f.y += 1;

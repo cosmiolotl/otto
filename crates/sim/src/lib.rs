@@ -32,4 +32,4 @@ pub use piece::{Piece, Rotation};
 pub use queue::{BagSeen, PREVIEW, PieceQueue};
 pub use rng::{Rng, SplitMix};
 pub use state::{Key, LockObserver, LockOutcome, Placement, PlayerState, Stats};
-pub use versus::{Match, MatchResult};
+pub use versus::Match;

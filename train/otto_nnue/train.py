@@ -60,6 +60,9 @@ def main(argv=None):
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args(argv)
+    if args.swap > 0 and args.lam > 0:
+        # Teacher scores belong to the recorded side to move; a swapped sample has none for the new one.
+        ap.error("--swap needs --lam 0")
 
     torch.manual_seed(args.seed)
     out = Path(args.out)
@@ -67,12 +70,12 @@ def main(argv=None):
     dev = torch.device(args.device)
     sets = [DataSet(s) for s in args.data]
     layout = sets[0].layout
-    train = Loader(sets, args.batch, "train", swap_prob=args.swap, seed=args.seed)
-    val = Loader(sets, args.batch, "val", seed=args.seed + 1)
+    train = Loader(sets, args.batch, train=True, swap_prob=args.swap, seed=args.seed)
+    val = Loader(sets, args.batch, train=False, seed=args.seed + 1)
     n_train = train.count()
     steps_per_epoch = max(1, math.ceil(n_train / args.batch))
     total_steps = steps_per_epoch * args.epochs
-    target = Target.fit(sets, args.lam, args.teacher)
+    target = Target.fit(sets, args.lam, args.teacher, seed=args.seed)
     print(f"data: {sum(len(s) for s in sets)} samples ({n_train} train) from {len(sets)} set(s); "
           f"{steps_per_epoch} steps/epoch; device {dev}; teacher {args.teacher} fit a={target.a:.4f} c={target.c:.4f}")
 

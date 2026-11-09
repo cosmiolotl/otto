@@ -176,12 +176,16 @@ fn weights_json(w: &Weights) -> String {
     serde_json::to_string_pretty(w).unwrap() + "\n"
 }
 
-/// Run (or resume) a tuning run. Progress goes to stderr; files to `cfg.out`.
+/// Run (or resume) a tuning run on `cfg.threads` threads. Progress goes to stderr; files to `cfg.out`.
 pub fn tune(cfg: &TuneConfig) -> Result<TuneState, String> {
-    if cfg.threads > 0 {
-        // Fails harmlessly if the global pool already exists (e.g. in tests).
-        let _ = rayon::ThreadPoolBuilder::new().num_threads(cfg.threads).build_global();
+    if cfg.threads == 0 {
+        return run_tune(cfg);
     }
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(cfg.threads).build().map_err(|e| e.to_string())?;
+    pool.install(|| run_tune(cfg))
+}
+
+fn run_tune(cfg: &TuneConfig) -> Result<TuneState, String> {
     let out = PathBuf::from(&cfg.out);
     for d in [out.clone(), out.join("pool"), out.join("oracle")] {
         std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
@@ -189,6 +193,9 @@ pub fn tune(cfg: &TuneConfig) -> Result<TuneState, String> {
     let io = |e: std::io::Error| e.to_string();
     let start = weights::load(&cfg.start)?;
     let fixed: Vec<Weights> = cfg.fixed.iter().map(|s| weights::load(s)).collect::<Result<_, _>>()?;
+    if cfg.oracle_every > 0 && fixed.is_empty() {
+        return Err("oracle_every needs a fixed opponent to record the oracle game against".into());
+    }
     let lambda = cfg.lambda();
     let state_path = out.join("state.json");
     let mut st = if state_path.exists() {
@@ -240,7 +247,6 @@ pub fn tune(cfg: &TuneConfig) -> Result<TuneState, String> {
             break;
         }
         let t0 = Instant::now();
-        // Pool for this generation.
         let mut pool: Vec<BotSpec> = fixed_specs.clone();
         for f in st.pool.iter().rev().take(cfg.pool_recent).rev() {
             pool.push(spec(weights::load(out.join(f).to_str().unwrap())?));
@@ -249,7 +255,6 @@ pub fn tune(cfg: &TuneConfig) -> Result<TuneState, String> {
             let mean_w = from_unit(&start, &st.cma.mean, format!("mean-{g:04}"));
             pool.push(BotSpec { name: "mean".into(), ..spec(mean_w) });
         }
-        // Candidates and their games.
         let xs: Vec<Vec<f64>> = st.cma.ask().into_iter().map(|x| x.into_iter().map(reflect).collect()).collect();
         let cands: Vec<BotSpec> =
             xs.iter().enumerate().map(|(k, x)| spec(from_unit(&start, x, format!("cand-{g:04}-{k:02}")))).collect();
@@ -282,7 +287,6 @@ pub fn tune(cfg: &TuneConfig) -> Result<TuneState, String> {
         st.cma.tell(&xs, &fitness);
         let wall = t0.elapsed().as_secs_f64();
         st.elapsed_s += wall;
-        // Logs and checkpoints.
         let mut sorted = fitness.clone();
         sorted.sort_by(f64::total_cmp);
         let (hi, lo) = st.cma.axis_sd();

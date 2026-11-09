@@ -1,13 +1,13 @@
 //! `sim tune` and `sim tournament` (`docs/SELFPLAY.md`).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tetris_bot::{BotSpec, SearchOptions, weights};
-use tetris_selfplay::Conditions;
 use tetris_selfplay::tournament::{Tournament, render, run_tournament, unique_names};
 use tetris_selfplay::tune::{TuneConfig, tune as run_tune};
 
-use crate::args::{Args, CmdResult, usage_error};
+use crate::args::{Args, CmdResult, conditions, usage_error};
+use tetris_sim::replay::trace_files;
 
 /// `sim tune --config tune/m5.toml`: run or resume (overrides for `out`, `generations`, `max_games`).
 pub fn tune(args: &Args) -> CmdResult {
@@ -29,19 +29,14 @@ pub fn tune(args: &Args) -> CmdResult {
     Ok(())
 }
 
-/// The `*.json` files in `dir`, sorted.
-fn json_files(dir: &str) -> Result<Vec<String>, String> {
-    let rd = std::fs::read_dir(dir).map_err(|e| format!("{dir}: {e}"))?;
-    let mut files: Vec<PathBuf> =
-        rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
-    files.sort();
-    Ok(files.iter().map(|p| p.to_string_lossy().into_owned()).collect())
-}
-
 /// `sim tournament --pool runs/m5/pool --bots default,steady,greedy-app --pairs 200`: round robin.
 pub fn tournament(args: &Args) -> CmdResult {
     let mut specs: Vec<String> = match args.get("--pool") {
-        Some(dir) => json_files(dir)?,
+        Some(dir) => trace_files(Path::new(dir))
+            .map_err(|e| format!("{dir}: {e}"))?
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
         None => Vec::new(),
     };
     specs.extend(args.list("--bots"));
@@ -55,10 +50,7 @@ pub fn tournament(args: &Args) -> CmdResult {
         return Err(usage_error("tournament needs at least two bots (--pool DIR and/or --bots a,b,...)"));
     }
     let names = unique_names(&bots);
-    let max_pieces: u32 = args.num("--max-pieces", 2000)?;
-    let pps = args.pair("--pps", [2.4, 2.6])?;
-    let varied = args.has("--varied");
-    let cond = Conditions { pps, max_pieces, tl_fraction: if varied { 0.5 } else { 1.0 }, ..Default::default() };
+    let cond = conditions(args, [2.4, 2.6])?;
     let anchor = match args.get("--anchor") {
         Some(a) => {
             names.iter().position(|n| n == a).ok_or_else(|| format!("anchor {a} is not in the roster {names:?}"))?
@@ -76,12 +68,13 @@ pub fn tournament(args: &Args) -> CmdResult {
     };
     let n = t.bots.len();
     println!(
-        "tournament: {n} bots, {} matchups x {} seed pairs = {} games; width {width}; {} rules; PPS {:?}; draw at {max_pieces} pieces",
+        "tournament: {n} bots, {} matchups x {} seed pairs = {} games; width {width}; {} rules; PPS {:?}; draw at {} pieces",
         n * (n - 1) / 2,
         t.pairs,
         n * (n - 1) * t.pairs,
-        if varied { "varied" } else { "TL" },
-        pps
+        if t.cond.tl_fraction < 1.0 { "varied" } else { "TL" },
+        t.cond.pps,
+        t.cond.max_pieces
     );
     let r = run_tournament(&t);
     print!("{}", render(&r));

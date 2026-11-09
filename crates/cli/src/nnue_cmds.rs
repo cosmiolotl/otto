@@ -5,11 +5,10 @@ use std::path::PathBuf;
 
 use tetris_bot::nnue::Network;
 use tetris_bot::{BotSpec, SearchOptions};
-use tetris_selfplay::Conditions;
 use tetris_selfplay::datagen::format::read_samples;
 use tetris_selfplay::datagen::{DatagenConfig, run};
 
-use crate::args::{Args, CmdResult, usage_error};
+use crate::args::{Args, CmdResult, conditions, usage_error};
 
 /// `sim datagen --bots runs/m5/pool/gen-0500.json,default --games 1000 --out data/m5-a`.
 pub fn datagen(args: &Args) -> CmdResult {
@@ -19,12 +18,7 @@ pub fn datagen(args: &Args) -> CmdResult {
         return Err(usage_error("datagen needs --bots a,b,..."));
     }
     let out = args.require("--out")?;
-    let cond = Conditions {
-        pps: args.pair("--pps", [2.0, 3.0])?,
-        tl_fraction: if args.has("--varied") { 0.5 } else { 1.0 },
-        max_pieces: args.num("--max-pieces", 2000)?,
-        ..Default::default()
-    };
+    let cond = conditions(args, [2.0, 3.0])?;
     let cfg = DatagenConfig {
         bots,
         games: args.num("--games", 100)?,

@@ -40,7 +40,6 @@ pub fn board_features(b: &Board) -> BoardFeatures {
     let top = b.top();
     let mut f = BoardFeatures::default();
 
-    // Top-down: holes per row.
     let mut above = 0u16;
     for y in (0..top).rev() {
         let r = rows[y];
@@ -49,7 +48,6 @@ pub fn board_features(b: &Board) -> BoardFeatures {
         f.hole_rows += (holes != 0) as u32;
         above |= r;
     }
-    // Bottom-up: covered cells, transitions.
     let mut empty_below = 0u16;
     let mut prev = FULL_ROW; // the floor
     for &r in &rows[..top] {
@@ -62,7 +60,6 @@ pub fn board_features(b: &Board) -> BoardFeatures {
     }
     f.col_trans += prev.count_ones(); // the surface (row `top` is empty)
 
-    // Heights, well, bumpiness.
     let mut best_depth = -1i32;
     for x in 0..BOARD_WIDTH {
         let hx = h[x] as i32;
@@ -86,7 +83,6 @@ pub fn board_features(b: &Board) -> BoardFeatures {
         f.bump += d;
         f.bump_sq += d * d;
     }
-    // Rows ready for a quad in the well.
     let wbit = 1u16 << wc;
     let mut y = h[wc] as usize;
     while y < top && f.quad_ready < 4 && rows[y] | wbit == FULL_ROW {
@@ -207,7 +203,7 @@ mod tests {
             ###.######
             ",
         );
-        // Row 1 is empty apart from nothing: make row 1 "full except 3 cells" for a ready double.
+        // The same slot with row 1 full except the T's three cells: a ready double.
         let ready = Board::from_ascii(
             "
             ..#.......

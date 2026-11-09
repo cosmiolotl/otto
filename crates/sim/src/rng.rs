@@ -24,11 +24,6 @@ impl Rng {
         Rng { value: v as u32 }
     }
 
-    /// Restore from a raw internal value (`rng.seed` in snapshots).
-    pub fn from_state(value: u32) -> Rng {
-        Rng::new(value as i64)
-    }
-
     /// Internal value (`RNG.seed` getter).
     #[inline]
     pub fn state(&self) -> u32 {

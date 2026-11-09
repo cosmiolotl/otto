@@ -102,21 +102,6 @@ impl Rotation {
     pub const fn add(self, amount: i8) -> Rotation {
         Rotation::from_u8((self as i8 + amount).rem_euclid(4) as u8)
     }
-
-    #[inline]
-    pub const fn cw(self) -> Rotation {
-        self.add(1)
-    }
-
-    #[inline]
-    pub const fn ccw(self) -> Rotation {
-        self.add(-1)
-    }
-
-    #[inline]
-    pub const fn flip(self) -> Rotation {
-        self.add(2)
-    }
 }
 
 /// Precomputed collision data for one piece in one rotation.
@@ -281,12 +266,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn rotation_arith() {
-        assert_eq!(Rotation::North.ccw(), Rotation::West);
-        assert_eq!(Rotation::West.cw(), Rotation::North);
-        assert_eq!(Rotation::East.flip(), Rotation::West);
     }
 }

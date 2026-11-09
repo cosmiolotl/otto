@@ -230,7 +230,7 @@ impl Network {
     /// `sent` more incoming lines than at preparation time. Returns the logit.
     pub fn evaluate(&self, me: &PlayerState, my_fpp: u32, opp: &OpponentTable, sent: u32) -> f32 {
         let mut f = Features::default();
-        features::extract(me, my_fpp, 0, &mut f);
+        features::extract(me, my_fpp, &mut f);
         let k = (opp.base_pending + sent).min(PENDING_MAX as u32) as usize;
         Network::logit(self.eval(f.as_slice(), &opp.sides[k], features::bucket(me)))
     }
@@ -295,19 +295,25 @@ mod tests {
         for (i, me) in states.iter().enumerate() {
             let opp = &states[(i + 1) % states.len()];
             let (mut a, mut b) = (Features::default(), Features::default());
-            features::extract(me, 24, 0, &mut a);
-            features::extract(opp, 26, 0, &mut b);
+            features::extract(me, 24, &mut a);
+            features::extract(opp, 26, &mut b);
             let bk = features::bucket(me);
             let r = reference(&net, a.as_slice(), b.as_slice(), bk);
             assert_eq!(net.eval_pair(a.as_slice(), b.as_slice(), bk), r);
             let mut slow = net.clone();
             slow.avx2 = false;
             assert_eq!(slow.eval_pair(a.as_slice(), b.as_slice(), bk), r);
-            // The opponent table gives the same as extracting with the extra pending lines.
+            // The opponent table gives the same as an opponent with `sent` more pending lines (that are not
+            // ready to enter yet: a search path's attack only grows the pending total).
             let t = net.opponent_table(opp, 26);
             for sent in [0, 3, 50] {
+                let mut hit = opp.clone();
+                if sent > 0 {
+                    let far = hit.frame + 1000;
+                    hit.receive_garbage(IncomingGarbage { frame: far, amount: sent, cid: 9, gameid: 1 });
+                }
                 let mut c = Features::default();
-                features::extract(opp, 26, sent, &mut c);
+                features::extract(&hit, 26, &mut c);
                 let want = Network::logit(net.eval_pair(a.as_slice(), c.as_slice(), bk));
                 assert_eq!(net.evaluate(me, 24, &t, sent), want);
             }

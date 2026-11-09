@@ -127,6 +127,3 @@ def reference_eval(q: QuantNet, me: np.ndarray, opp: np.ndarray, bucket: int) ->
     h3 = np.clip(v3, 0, A_Q)
     return int(q.out_b[bucket] + q.out_w[bucket].astype(np.int64) @ h3)
 
-
-def logit(raw: int) -> float:
-    return raw / (A_Q * W_Q)

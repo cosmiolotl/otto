@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use tetris_bot::eval::board::board_features;
 use tetris_bot::eval::{Evaluator, HandEval, PathAcc};
-use tetris_bot::search::state_hash;
+use tetris_bot::state_hash;
 use tetris_bot::{Bot, Observation, SearchOptions, weights};
 use tetris_sim::movegen::{self, GenOptions};
 use tetris_sim::{Match, PlayerState};

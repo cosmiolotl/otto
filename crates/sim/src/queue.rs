@@ -177,11 +177,6 @@ impl PieceQueue {
     pub fn iter(&self, n: usize) -> impl Iterator<Item = Piece> + '_ {
         (0..n.min(self.len())).map(move |i| self.peek(i))
     }
-
-    /// The bag RNG state.
-    pub fn rng_state(&self) -> u32 {
-        self.rng.state()
-    }
 }
 
 #[cfg(test)]

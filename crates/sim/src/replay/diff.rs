@@ -168,10 +168,13 @@ pub fn diff_trace_file(path: &Path) -> Result<DiffReport, ReplayError> {
 
 /// All `*.json` files in `dir`, sorted.
 pub fn trace_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "json"))
-        .collect();
+    let mut v = Vec::new();
+    for e in std::fs::read_dir(dir)? {
+        let p = e?.path();
+        if p.extension().is_some_and(|e| e == "json") {
+            v.push(p);
+        }
+    }
     v.sort();
     Ok(v)
 }

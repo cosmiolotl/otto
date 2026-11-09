@@ -182,7 +182,6 @@ pub fn is_immobile(board: &Board, f: &Falling) -> bool {
 /// T-spin corner rule (`#detectSpinFromCorners`, `src/engine/index.ts:1312-1359`; corner table
 /// `kicks/data.ts:2564-2589`).
 pub fn t_corner_spin(board: &Board, f: &Falling, fin_or_tst: bool) -> Spin {
-    // 1. If the T can move down, no spin.
     if board.fits(f.shape(), f.x, f.y - 1) {
         return Spin::None;
     }
@@ -232,7 +231,7 @@ mod tests {
 
     #[test]
     fn tsd_is_normal() {
-        // Classic TSD slot: T rotated 180 into it.
+        // Classic TSD slot: a T dropped in East orientation and rotated CW into South.
         let b = Board::from_ascii(
             "
             ##........
@@ -240,7 +239,6 @@ mod tests {
             ##.#######
             ",
         );
-        // T pointing down (rot 2) at x=1, y=2: cells (2,1),(3,2)... construct directly.
         let mut f = Falling::new(Piece::T, Rotation::East, 1, 3);
         f.sonic_drop(&b);
         let r = f.rotate(&b, 1).expect("rotates");
@@ -256,15 +254,14 @@ mod tests {
 
     #[test]
     fn t_mini_with_one_front_corner() {
-        // T flat (rot 0) resting in a 3-wide notch with both back corners filled and one front corner.
+        // T North resting on the floor of a 3-wide notch. Corners around the centre (2,0): front (1,1) and
+        // (3,1), back (1,-1) and (3,-1) (the floor, always occupied).
         let b = Board::from_ascii(
             "
             #.........
             #...######
             ",
         );
-        // T rot 0 at x=1,y=1 → cells (2,1),(1,0),(2,0),(3,0). Corners around centre (2,0):
-        // top-left (1,1) empty? row1 col1 '.', top-right (3,1) '.', bottom (1,-1),(3,-1) floor = filled.
         let f = Falling::new(Piece::T, Rotation::North, 1, 1);
         assert!(f.fits(&b));
         assert!(f.is_grounded(&b));
@@ -275,7 +272,7 @@ mod tests {
             #...######
             ",
         );
-        // top-left (1,1) filled now: 3 corners, front corners (rot 0: 0=TL,1=TR) = 1 → mini.
+        // Filling front corner (1,1): 3 corners, 1 of them front → mini; a TST/fin kick makes it normal.
         assert_eq!(t_corner_spin(&b2, &f, false), Spin::Mini);
         assert_eq!(t_corner_spin(&b2, &f, true), Spin::Normal);
     }

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .layout import Layout, read_header
+from .layout import read_header
 
 META = np.dtype(
     [
@@ -27,22 +27,33 @@ META = np.dtype(
     ]
 )
 assert META.itemsize == 32
+DATA_FORMAT = 1
 
 # Every `VAL_EVERY`-th game is validation data, so positions of one game never straddle the split.
 VAL_EVERY = 20
 
 
-def is_val(meta: np.ndarray, val_every: int = VAL_EVERY) -> np.ndarray:
-    return (meta["game"] % val_every) == 0
+def is_val(meta: np.ndarray) -> np.ndarray:
+    return (meta["game"] % VAL_EVERY) == 0
+
+
+def outcome(meta: np.ndarray) -> np.ndarray:
+    """The side to move's result as a probability target: 1 win, 0.5 draw, 0 loss (float32)."""
+    return (meta["result"].astype(np.float32) + 1.0) / 2.0
 
 
 class DataSet:
     def __init__(self, stem: str | Path):
-        self.stem = str(stem)
         self.header, self.layout = read_header(stem)
+        h = self.header
+        if (h["format"], h["meta_bytes"]) != (DATA_FORMAT, META.itemsize):
+            raise ValueError(f"{stem}: data format {h['format']} with {h['meta_bytes']}-byte records, "
+                             f"trainer reads format {DATA_FORMAT} with {META.itemsize}-byte records")
         self.meta = np.memmap(f"{stem}.meta", dtype=META, mode="r")
         self.feat = np.memmap(f"{stem}.feat", dtype="<u2", mode="r")
-        assert len(self.meta) == self.header["samples"], "meta/header sample count mismatch"
+        if (len(self.meta), len(self.feat)) != (h["samples"], h["features"]):
+            raise ValueError(f"{stem}: files hold {len(self.meta)} samples / {len(self.feat)} features, "
+                             f"header says {h['samples']} / {h['features']}")
 
     def __len__(self) -> int:
         return len(self.meta)
@@ -90,7 +101,7 @@ def make_batch(feat: np.ndarray, m: np.ndarray, swap: np.ndarray | None = None) 
     opp_start = me_start + m["n_me"]
     me_len, opp_len = m["n_me"], m["n_opp"]
     bucket = m["bucket_me"].astype(np.int64)
-    result = (m["result"].astype(np.float32) + 1.0) / 2.0
+    result = outcome(m)
     if swap is not None and swap.any():
         me_start, opp_start = np.where(swap, opp_start, me_start), np.where(swap, me_start, opp_start)
         me_len, opp_len = np.where(swap, opp_len, me_len), np.where(swap, me_len, opp_len)
@@ -111,20 +122,18 @@ class Loader:
     a buffer of `buffer_chunks` chunks, and yields batches.
     """
 
-    def __init__(self, sets: list[DataSet], batch: int, split: str, chunk: int = 1 << 18, buffer_chunks: int = 8,
+    def __init__(self, sets: list[DataSet], batch: int, train: bool, chunk: int = 1 << 18, buffer_chunks: int = 8,
                  swap_prob: float = 0.0, seed: int = 0):
-        self.sets, self.batch, self.split = sets, batch, split
+        self.sets, self.batch, self.train = sets, batch, train
         self.chunk, self.buffer_chunks = chunk, buffer_chunks
-        self.swap_prob = swap_prob if split == "train" else 0.0
+        self.swap_prob = swap_prob if train else 0.0
         self.rng = np.random.default_rng(seed)
-        layouts = {s.layout.raw for s in sets}
-        if len(layouts) != 1:
+        if len({s.layout.raw for s in sets}) != 1:
             raise ValueError("data sets have different feature layouts")
-        self.layout: Layout = sets[0].layout
 
     def _keep(self, m: np.ndarray) -> np.ndarray:
         val = is_val(m)
-        return val if self.split == "val" else ~val
+        return ~val if self.train else val
 
     def chunks(self):
         out = [(si, a) for si, s in enumerate(self.sets) for a in range(0, len(s), self.chunk)]
@@ -148,7 +157,6 @@ class Loader:
                 parts.append((feat, m))
             if not parts:
                 continue
-            # Merge the buffer into one feature array.
             feats, metas, base = [], [], 0
             for feat, m in parts:
                 m = m.copy()
@@ -158,11 +166,11 @@ class Loader:
                 metas.append(m)
             feat = np.concatenate(feats)
             meta = np.concatenate(metas)
-            if self.split == "train":
+            if self.train:
                 meta = meta[self.rng.permutation(len(meta))]
             for b in range(0, len(meta), self.batch):
                 mb = meta[b : b + self.batch]
-                if self.split == "train" and len(mb) < self.batch // 2:
+                if self.train and len(mb) < self.batch // 2:
                     continue
                 swap = self.rng.random(len(mb)) < self.swap_prob if self.swap_prob > 0 else None
                 yield make_batch(feat, mb, swap)

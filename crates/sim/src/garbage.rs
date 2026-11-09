@@ -17,6 +17,14 @@ pub struct IncomingGarbage {
     pub gameid: u32,
 }
 
+impl IncomingGarbage {
+    /// The first frame the item may enter the board (`garbagespeed` frames after it started travelling).
+    #[inline]
+    pub fn ready_at(&self, cfg: &Config) -> u32 {
+        self.frame + cfg.garbage_speed
+    }
+}
+
 /// Hole size (`garbageholesize`); only 1 is supported.
 const HOLE_SIZE: usize = 1;
 const COLUMN_WIDTH: u32 = (BOARD_WIDTH - (HOLE_SIZE - 1)) as u32;
@@ -134,7 +142,6 @@ impl GarbageQueue {
         if self.items.is_empty() {
             return 0;
         }
-        // Stable sort by frame (items normally arrive in order already).
         if !self.items.windows(2).all(|w| w[0].frame <= w[1].frame) {
             self.items.sort_by_key(|g| g.frame);
         }
@@ -144,7 +151,7 @@ impl GarbageQueue {
         let mut n = 0;
         while n < lines && !self.items.is_empty() {
             let item = self.items[0];
-            if item.frame as i64 + cfg.garbage_speed as i64 > limit {
+            if item.ready_at(cfg) as i64 > limit {
                 break;
             }
             self.items[0].amount -= 1;

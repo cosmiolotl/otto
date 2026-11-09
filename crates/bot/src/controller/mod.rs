@@ -1,4 +1,4 @@
-//! Release controller: picks KILL / CANCEL / BUILD once per move, before the search (PLAN.md M4).
+//! Release controller: picks KILL / CANCEL / BUILD once per move, before the search (`docs/PLAN.md` M4).
 //!
 //! 1. **KILL** if `kill_margin = my_burst - my_pending + opp_pending - opp_absorb > kill_threshold`,
 //!    where `opp_absorb = opp_margin + opp_burst_scale · opp_burst`: my best known-queue release, after
@@ -36,6 +36,9 @@ pub enum Mode {
 }
 
 impl Mode {
+    pub const ALL: [Mode; 3] = [Mode::Build, Mode::Kill, Mode::Cancel];
+    pub const COUNT: usize = Mode::ALL.len();
+
     pub const fn index(self) -> usize {
         self as usize
     }

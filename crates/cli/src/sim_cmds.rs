@@ -223,7 +223,6 @@ pub fn bench_movegen(args: &Args) -> CmdResult {
         pool.len(),
         100.0 * step_only_states as f64 / pool.len() as f64
     );
-    // Pathfinder: one query per placement over a slice of the pool.
     let mut pf = Pathfinder::new();
     let mut keys = Vec::new();
     for mode in [Mode::Sonic, Mode::Step] {

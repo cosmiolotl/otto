@@ -297,7 +297,6 @@ fn solve(board: &Board, empty: &[u64; W], start: Falling, start_spin: Spin, mode
         }
     }
 
-    // Closure over moves and rotations.
     let mut done = [Bits::EMPTY; 4];
     loop {
         let mut progressed = false;
@@ -341,7 +340,6 @@ fn solve(board: &Board, empty: &[u64; W], start: Falling, start_spin: Spin, mode
         }
     }
 
-    // Outcomes per (unfolded) rotation.
     let mut m = [[Bits::EMPTY; 4]; 3];
     for b in 0..nrot {
         let (ub, gb, rb) = (&u[b], &g[b], &reach[b]);

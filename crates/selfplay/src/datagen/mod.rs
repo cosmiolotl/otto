@@ -16,8 +16,8 @@ use tetris_bot::nnue::{Features, bucket, extract};
 use tetris_bot::{BotSpec, Evaluator, HandEval, PathAcc};
 use tetris_sim::SplitMix;
 
-use crate::conditions::Conditions;
-use crate::game::{GameSpec, play_game_with};
+use crate::conditions::{Conditions, PairDraw};
+use crate::game::play_game_with;
 use crate::schedule::derive_seed;
 use format::{DataWriter, Sample};
 
@@ -56,17 +56,10 @@ pub fn play_and_sample(cfg: &DatagenConfig, game: usize) -> (Vec<Sample>, Option
     let mut rng = SplitMix(derive_seed(&[cfg.seed, game as u64, 0xda7a]));
     let n = cfg.bots.len() as u64;
     let seats = [rng.below(n) as usize, rng.below(n) as usize];
-    let seed = rng.park_miller_seed();
+    let match_seed = rng.park_miller_seed();
     let (fpp, mcfg) = cfg.cond.sample(&mut rng);
-    let spec = GameSpec {
-        seed,
-        bots: seats.map(|i| cfg.bots[i].clone()),
-        fpp,
-        bot_seeds: [rng.next_u64(), rng.next_u64()],
-        max_pieces: cfg.cond.max_pieces,
-        record_keys: false,
-        cfg: mcfg,
-    };
+    let draw = PairDraw { match_seed, fpp, bot_seeds: [rng.next_u64(), rng.next_u64()], cfg: mcfg };
+    let spec = draw.game(&cfg.bots[seats[0]], &cfg.bots[seats[1]], false, cfg.cond.max_pieces, false);
     let teachers = [teacher(&spec.bots[0]), teacher(&spec.bots[1])];
     let mut out: Vec<(usize, Sample)> = Vec::new();
     let g = play_game_with(&spec, |m, p, d| {
@@ -87,8 +80,8 @@ pub fn play_and_sample(cfg: &DatagenConfig, game: usize) -> (Vec<Sample>, Option
             static_score: teachers[p].eval(real, &PathAcc::default()),
             game: game as u32,
         };
-        extract(real, fpp[p], 0, &mut s.me);
-        extract(opp, fpp[1 - p], 0, &mut s.opp);
+        extract(real, fpp[p], &mut s.me);
+        extract(opp, fpp[1 - p], &mut s.opp);
         out.push((p, s));
     });
     let finals = [g.stats[0].pieces, g.stats[1].pieces];
@@ -178,10 +171,7 @@ mod tests {
             assert_eq!(x.me.as_slice(), y.me.as_slice());
             assert_eq!((x.result, x.ply, x.to_end), (y.result, y.ply, y.to_end));
         }
-        // Results are opposite for the two players when someone won.
-        if wa.is_some() {
-            assert!(a.iter().any(|s| s.result == 1) || a.iter().any(|s| s.result == -1));
-            assert!(a.iter().all(|s| s.result != 0));
-        }
+        // A draw labels every sample 0; a decided game labels every sample a win or a loss.
+        assert!(a.iter().all(|s| (s.result == 0) == wa.is_none()), "winner {wa:?}");
     }
 }

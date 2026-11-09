@@ -2,7 +2,7 @@
 //! play one game and print clear-type counts, b2b/surge statistics and occasional boards.
 
 use tetris_bot::{Bot, Observation, SearchOptions, weights};
-use tetris_sim::{Match, MatchResult, Spin};
+use tetris_sim::{Match, Spin};
 
 #[derive(Default, Debug)]
 struct Counts {
@@ -76,7 +76,7 @@ fn main() {
             break;
         }
     }
-    println!("result {:?} after {n} pieces, frame {}", m.result.unwrap_or(MatchResult::Draw), m.frame);
+    println!("winner {:?} after {n} pieces, frame {}", m.winner, m.frame);
     if std::env::var("SHOW_END").is_ok() {
         for pl in &m.players {
             println!("{:?} pending {} b2b {} mult {:.2}", pl.board, pl.garbage.size(), pl.chain.b2b, pl.multiplier());

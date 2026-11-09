@@ -1,6 +1,6 @@
 //! `cargo bench -p tetris-bot --bench bot_move` — criterion timing of one full bot move (observation →
 //! controller → beam search → placement) at fixed beam widths, over a fixed pool of mid-game positions
-//! from a seeded default-vs-default game. One iteration = one move on the next pool position.
+//! from two seeded default-vs-default games. One iteration = one move on the next pool position.
 
 use std::hint::black_box;
 
@@ -8,7 +8,6 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use tetris_bot::{Bot, Observation, SearchOptions, weights};
 use tetris_sim::Match;
 
-/// Observations from a seeded self-play game (default bot, width 32), every 3rd move from piece 20 on.
 fn pool() -> Vec<Observation> {
     let w = weights::preset("default").unwrap();
     let opts = SearchOptions { width: 32, ..Default::default() };

@@ -29,25 +29,8 @@ impl Job {
     /// Both games of a pair: the same match seed and rules; each bot keeps its own frames per piece and
     /// RNG seed across the swap, so the seating is the only difference.
     pub fn new(a: (usize, &BotSpec), b: (usize, &BotSpec), draw: &PairDraw, max_pieces: u32, record: bool) -> Job {
-        let [fa, fb] = draw.fpp;
-        let [sa, sb] = draw.bot_seeds;
-        let g = |bots: [BotSpec; 2], fpp, bot_seeds| GameSpec {
-            seed: draw.match_seed,
-            bots,
-            fpp,
-            bot_seeds,
-            max_pieces,
-            record_keys: record,
-            cfg: draw.cfg,
-        };
-        Job {
-            a: a.0,
-            b: b.0,
-            games: [
-                g([a.1.clone(), b.1.clone()], [fa, fb], [sa, sb]),
-                g([b.1.clone(), a.1.clone()], [fb, fa], [sb, sa]),
-            ],
-        }
+        let game = |swapped| draw.game(a.1, b.1, swapped, max_pieces, record);
+        Job { a: a.0, b: b.0, games: [game(false), game(true)] }
     }
 }
 

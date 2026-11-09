@@ -71,6 +71,9 @@ class Layout:
             off += b.size
         if off != j["n_features"]:
             raise ValueError(f"blocks cover {off} features, layout says {j['n_features']}")
+        # The int16 accumulator must not overflow: every active feature at the weight clamp plus the bias.
+        if (j["max_active"] * FT_W_MAX + FT_B_MAX) * FT_Q > 32767:
+            raise ValueError(f"max_active {j['max_active']} can overflow the int16 accumulator at these clamps")
         # Rust's `layout_json` is compact with keys in this order; re-serialising reproduces it.
         raw = json.dumps(j, separators=(",", ":"))
         return Layout(raw, j["n_features"], j["max_active"], blocks)

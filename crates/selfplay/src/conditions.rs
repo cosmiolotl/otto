@@ -5,7 +5,10 @@
 //! - [`FixedSpeed`]: exact TL rules at a fixed speed per bot (`sim bot-vs-bot`).
 
 use serde::{Deserialize, Serialize};
+use tetris_bot::BotSpec;
 use tetris_sim::{Config, SplitMix};
+
+use crate::game::GameSpec;
 
 /// Frames per piece at `pps` pieces per second (60 fps).
 pub fn fpp_of_pps(pps: f64) -> u32 {
@@ -19,6 +22,23 @@ pub struct PairDraw {
     pub fpp: [u32; 2],
     pub bot_seeds: [u64; 2],
     pub cfg: &'static Config,
+}
+
+impl PairDraw {
+    /// The game with bot A in seat 0 (`swapped`: in seat 1). Each bot keeps its own speed and RNG seed.
+    pub fn game(&self, a: &BotSpec, b: &BotSpec, swapped: bool, max_pieces: u32, record_keys: bool) -> GameSpec {
+        let seat = |x: [u32; 2]| if swapped { [x[1], x[0]] } else { x };
+        let bot_seeds = if swapped { [self.bot_seeds[1], self.bot_seeds[0]] } else { self.bot_seeds };
+        GameSpec {
+            seed: self.match_seed,
+            bots: if swapped { [b.clone(), a.clone()] } else { [a.clone(), b.clone()] },
+            fpp: seat(self.fpp),
+            bot_seeds,
+            max_pieces,
+            record_keys,
+            cfg: self.cfg,
+        }
+    }
 }
 
 /// Ranges that match conditions are drawn from, once per pair (the frames per piece follow the bot, so the

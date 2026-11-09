@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use tetris_sim::{PieceQueue, Placement, SplitMix};
 
-use crate::controller::{Mode, Threat};
+use crate::controller::Mode;
 use crate::eval::{Evaluator, HandEval};
 use crate::obs::Observation;
 use crate::search::{Search, SearchOptions};
@@ -15,7 +15,6 @@ use crate::weights::Weights;
 pub struct Decision {
     pub placement: Placement,
     pub mode: Mode,
-    pub threat: Threat,
     pub score: f32,
     pub nodes: u64,
 }
@@ -25,9 +24,8 @@ pub struct Decision {
 pub struct BotStats {
     pub moves: u64,
     /// Moves per controller mode ([`Mode::index`]).
-    pub modes: [u64; 3],
+    pub modes: [u64; Mode::COUNT],
     pub think_ns: u64,
-    pub nodes: u64,
 }
 
 pub struct Bot<E: Evaluator = HandEval> {
@@ -72,8 +70,7 @@ impl<E: Evaluator> Bot<E> {
         let r = self.search.run(&root, obs.my_fpp, &self.eval, &self.opts, &self.tails)?;
         self.stats.moves += 1;
         self.stats.modes[plan.mode.index()] += 1;
-        self.stats.nodes += r.nodes;
         self.stats.think_ns += t0.elapsed().as_nanos() as u64;
-        Some(Decision { placement: r.placement, mode: plan.mode, threat: plan.threat, score: r.score, nodes: r.nodes })
+        Some(Decision { placement: r.placement, mode: plan.mode, score: r.score, nodes: r.nodes })
     }
 }

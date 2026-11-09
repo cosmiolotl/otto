@@ -1,6 +1,6 @@
 //! Beam search over own placements.
 //!
-//! - Ply 0 expands the root's movegen output (`Mode::Sonic`, hold branch included); every later ply
+//! - Ply 0 expands the root's movegen output ([`GEN_MODE`], hold branch included); every later ply
 //!   expands each beam node the same way. A child is `clone + apply_placement` (scored), and kept nodes
 //!   are advanced by `tick_n(fpp)`, so garbage arrival, tanking on non-clearing locks, cancelling and the
 //!   multiplier all happen inside the search.
@@ -12,23 +12,23 @@
 //!   `extra_plies` and average the result (K = 1 and 0 extra plies = score the preview leaf).
 //! - All buffers live in [`Search`] and are reused across moves.
 
-use std::collections::HashSet;
-use std::hash::{BuildHasherDefault, Hasher};
-
 use tetris_sim::movegen::{self, GenOptions};
 use tetris_sim::{PieceQueue, Placement, PlayerState};
 
 use crate::eval::{Evaluator, PathAcc};
+use crate::hash::{HashSet64, state_hash};
 
-/// Search parameters (not tuned by M5; the width is the main cost knob).
+/// The movegen reachability model of the search, the burst sub-search and the self-play legality checks
+/// (`docs/DECISIONS.md` D7).
+pub const GEN_MODE: movegen::Mode = movegen::Mode::Sonic;
+
+/// Search parameters (not tuned by the M5 tuner; the width is the main cost knob).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SearchOptions {
     /// Beam width (nodes kept per ply).
     pub width: usize,
     /// Plies: current + preview (6).
     pub depth: usize,
-    /// Movegen reachability model (D7: `Sonic`).
-    pub gen_mode: movegen::Mode,
     /// Bag-consistent continuations sampled beyond the preview (K).
     pub continuations: usize,
     /// Greedy plies per continuation after the beam (0 = score the preview leaf).
@@ -39,67 +39,8 @@ pub const DEFAULT_WIDTH: usize = 96;
 
 impl Default for SearchOptions {
     fn default() -> Self {
-        SearchOptions {
-            width: DEFAULT_WIDTH,
-            depth: 6,
-            gen_mode: movegen::Mode::Sonic,
-            continuations: 1,
-            extra_plies: 0,
-        }
+        SearchOptions { width: DEFAULT_WIDTH, depth: 6, continuations: 1, extra_plies: 0 }
     }
-}
-
-/// Hasher for keys that are already hashes.
-#[derive(Default)]
-pub struct PassThrough(u64);
-
-impl Hasher for PassThrough {
-    #[inline]
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    #[inline]
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = (self.0 << 8 | b as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-        }
-    }
-    #[inline]
-    fn write_u64(&mut self, v: u64) {
-        self.0 = v;
-    }
-}
-
-pub type HashSet64 = HashSet<u64, BuildHasherDefault<PassThrough>>;
-
-#[inline(always)]
-fn mix(h: u64, v: u64) -> u64 {
-    let x = (h ^ v).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    x ^ (x >> 29)
-}
-
-/// Transposition key: board rows, current, hold, chain, clutch flag, queue position, garbage queue.
-pub fn state_hash(s: &PlayerState) -> u64 {
-    let rows = s.board.rows();
-    let top = s.board.top();
-    let mut h = 0x243f_6a88_85a3_08d3u64 ^ top as u64;
-    for c in rows[..top].chunks(4) {
-        let w = c.iter().enumerate().fold(0u64, |w, (i, &r)| w | (r as u64) << (16 * i));
-        h = mix(h, w);
-    }
-    let misc = s.current() as u64
-        | (s.hold.map_or(7, |p| p as u64)) << 3
-        | (s.hold_locked as u64) << 6
-        | (s.last_was_clear as u64) << 7
-        | ((s.chain.b2b + 1) as u64 & 0xff) << 8
-        | ((s.chain.combo + 1) as u64 & 0xff) << 16
-        | (s.queue.dealt() as u64) << 24
-        | (s.topped_out as u64) << 56;
-    h = mix(h, misc);
-    for g in &s.garbage.items {
-        h = mix(h, g.amount as u64 | (g.frame as u64) << 32);
-    }
-    mix(h, s.garbage.sent as u64)
 }
 
 #[derive(Clone, Debug)]
@@ -159,7 +100,7 @@ impl Search {
         opts: &SearchOptions,
         tails: &[PieceQueue],
     ) -> Option<SearchResult> {
-        let gopts = GenOptions::new(opts.gen_mode, true);
+        let gopts = GenOptions::new(GEN_MODE, true);
         let discount = eval.discount();
         let width = opts.width.max(1);
         self.roots.clear();
@@ -209,7 +150,6 @@ impl Search {
             if self.cands.is_empty() {
                 break;
             }
-            // Keep the best few × width (then dedupe and cut to width).
             let order = |a: &Cand, b: &Cand| {
                 b.score
                     .total_cmp(&a.score)
@@ -267,7 +207,7 @@ impl Search {
         root: &PlayerState,
         tails: &[PieceQueue],
     ) -> u64 {
-        let gopts = GenOptions::new(opts.gen_mode, true);
+        let gopts = GenOptions::new(GEN_MODE, true);
         let discount = eval.discount();
         let k_total = 1 + tails.len();
         let mut nodes = 0;

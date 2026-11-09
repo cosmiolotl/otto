@@ -1,6 +1,4 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
-
-# otto
+<img src="assets/icon.svg" height="64" alt="OTTO">
 
 Otto is an engine trained to play competitive modern Tetris. 
 

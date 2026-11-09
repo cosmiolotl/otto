@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .data import Batch, DataSet, is_val
+from .data import Batch, DataSet, is_val, outcome
 
 TEACHERS = ("static", "search")
 SCORE_CLAMP = 1e4
@@ -38,10 +38,10 @@ class Target:
         m = np.concatenate([np.array(s.meta) for s in sets])
         m = m[(m["result"] != 0) & ~is_val(m)]
         if len(m) == 0:
-            return Target(lam, teacher)
+            raise ValueError("no decisive training samples to fit the teacher on (use lam = 0)")
         m = m[np.random.default_rng(seed).permutation(len(m))[:n]]
         x = torch.from_numpy(m[f"{teacher}_score"].astype(np.float64)).clamp(-SCORE_CLAMP, SCORE_CLAMP)
-        z = torch.from_numpy(((m["result"] + 1) / 2).astype(np.float64))
+        z = torch.from_numpy(outcome(m).astype(np.float64))
         s = x.std().clamp_min(1e-6)
         p = torch.zeros(2, dtype=torch.float64, requires_grad=True)
         opt = torch.optim.LBFGS([p], max_iter=200, line_search_fn="strong_wolfe")
@@ -59,6 +59,6 @@ class Target:
         """Targets for a batch of tensors."""
         if self.lam <= 0:
             return b.result
-        score = b.static_score if self.teacher == "static" else b.search_score
+        score = getattr(b, f"{self.teacher}_score")
         tp = torch.sigmoid(self.a * score.clamp(-SCORE_CLAMP, SCORE_CLAMP) + self.c)
         return self.lam * tp + (1 - self.lam) * b.result

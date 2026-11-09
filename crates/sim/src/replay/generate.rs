@@ -169,7 +169,7 @@ fn score(s: &PlayerState, r: &Reachable, style: Style, rng: &mut GenRng) -> i64 
         Style::Quad => {
             // Keep the well column empty until an I can take four lines; avoid breaking B2B unless the
             // chain is long (then sometimes break on purpose: surge).
-            let well = 9; // right-side well
+            let well = 9;
             let touches_well = out.cells.iter().any(|&(x, _)| x as usize == well);
             if out.lines == 4 {
                 bonus += 3_000;

@@ -51,7 +51,7 @@ def _bits(width: int) -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class FeatureTransformer(nn.Module):
-    def __init__(self, layout: Layout, init_scale: float = 0.02):
+    def __init__(self, layout: Layout):
         super().__init__()
         unknown = set(layout.blocks) ^ set(FACTORISERS)
         if unknown:
@@ -62,7 +62,7 @@ class FeatureTransformer(nn.Module):
             return nn.Parameter(torch.zeros(*shape, L1))
 
         def r(*shape):
-            return nn.Parameter(torch.randn(*shape, L1) * init_scale)
+            return nn.Parameter(torch.randn(*shape, L1) * 0.02)
 
         p = {}
         for name, block in layout.blocks.items():
@@ -147,7 +147,6 @@ class ValueNet(nn.Module):
         h2 = torch.cat([c, c * c * (127.0 / 128.0)], 1)
         z3 = self.l3(h2).view(n, N_BUCKETS, L3)[ar, b.bucket]
         h3 = z3.clamp(0, 1)
-        # Output bucket b uses row b of `out`.
         return (h3 * self.out.weight[b.bucket]).sum(1) + self.out.bias[b.bucket]
 
     @torch.no_grad()

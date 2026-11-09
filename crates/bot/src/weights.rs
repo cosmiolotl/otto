@@ -1,7 +1,8 @@
 //! The bot's parameters: one flat, named, serde-serialisable vector (`weights/*.json`).
 //!
-//! Every evaluation weight and every controller threshold is an `f32` field, so M5's CMA-ES can treat the
-//! whole thing as a vector ([`Weights::to_vec`] / [`Weights::set_from_vec`], with [`Weights::BOUNDS`]).
+//! Every evaluation weight and every controller threshold is an `f32` field, so the M5 CMA-ES tuner
+//! (`crates/selfplay`) can treat the whole thing as a vector ([`Weights::to_vec`] /
+//! [`Weights::set_from_vec`], with [`Weights::BOUNDS`]).
 //! Only `name` and the `controller` switch are outside the vector.
 //!
 //! Units: scores are roughly "lines of attack". A feature is measured in its natural unit (cells, rows,
@@ -15,7 +16,8 @@ macro_rules! weights {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         #[serde(default, deny_unknown_fields)]
         pub struct Weights {
-            /// Preset or file name (informational).
+            /// Preset or file name (informational). Empty when a file has none.
+            #[serde(default)]
             pub name: String,
             /// Release controller on (KILL / CANCEL / BUILD) or off (always BUILD).
             pub controller: bool,
@@ -137,7 +139,7 @@ weights! {
 }
 
 impl Weights {
-    /// The same weights with the reserve logic off (burst vs steady in RESULTS.md): controller off, no
+    /// The same weights with the reserve logic off (burst vs steady in `docs/RESULTS.md`): controller off, no
     /// B2B/reserve terms, attack rewarded once sent. Only the reserve logic changes.
     pub fn reserve_off(&self) -> Weights {
         Weights {
@@ -181,7 +183,7 @@ pub fn load(spec: &str) -> Result<Weights, String> {
     }
     let text = std::fs::read_to_string(spec).map_err(|e| format!("{spec}: {e}"))?;
     let mut w: Weights = serde_json::from_str(&text).map_err(|e| format!("{spec}: {e}"))?;
-    if w.name.is_empty() || w.name == "default" {
+    if w.name.is_empty() {
         w.name = file_stem(spec);
     }
     Ok(w)

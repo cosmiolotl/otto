@@ -27,7 +27,7 @@ pub struct BotTotals {
     pub max_spike: u32,
     pub big_spikes: u64,
     /// Moves per controller mode (BUILD, KILL, CANCEL).
-    pub modes: [u64; 3],
+    pub modes: [u64; Mode::COUNT],
     pub moves: u64,
     pub think_ns: u64,
 }
@@ -86,8 +86,8 @@ pub fn totals(n: usize, pairs: &[PairResult]) -> Vec<BotTotals> {
                 x.max_spike = x.max_spike.max(m.max_spike);
                 x.big_spikes += m.big_spikes as u64;
                 let b = &res.bot[seat];
-                for k in 0..3 {
-                    x.modes[k] += b.modes[k];
+                for (t, n) in x.modes.iter_mut().zip(b.modes) {
+                    *t += n;
                 }
                 x.moves += b.moves;
                 x.think_ns += b.think_ns;

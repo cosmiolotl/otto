@@ -20,7 +20,7 @@
 //!   | 28 | u32 | game index within the file |
 //!
 //! - `STEM.json`: `{"format": 1, "samples": N, "features": F, "meta_bytes": 32, "settings": {..},
-//!   "layout": <nnue::layout_json()>}`. The layout is written verbatim: the trainer hashes it to match
+//!   "layout": <tetris_bot::nnue::layout_json()>}`. The layout is written verbatim: the trainer hashes it to match
 //!   network files ([`tetris_bot::nnue::file::layout_hash`]).
 
 use std::fs::File;
@@ -176,8 +176,8 @@ mod tests {
             static_score: -2.0,
             game: 0,
         };
-        extract(&a, 24, 0, &mut s.me);
-        extract(&b, 25, 0, &mut s.opp);
+        extract(&a, 24, &mut s.me);
+        extract(&b, 25, &mut s.opp);
         w.push(&s).unwrap();
         w.push(&Sample { result: 1, ..s }).unwrap();
         assert_eq!(w.finish().unwrap(), 2);
