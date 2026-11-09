@@ -393,11 +393,6 @@ impl PlayerState {
     /// lock it as a hard drop. No validation beyond `debug_assert`s (see [`Self::check_placement`]).
     #[inline]
     pub fn apply_placement(&mut self, p: Placement) -> LockOutcome {
-        self.apply_placement_with(p, &mut ())
-    }
-
-    #[inline]
-    pub fn apply_placement_with<O: LockObserver>(&mut self, p: Placement, obs: &mut O) -> LockOutcome {
         if p.hold {
             let ok = self.hold();
             debug_assert!(ok, "hold while hold-locked");
@@ -407,7 +402,7 @@ impl PlayerState {
         debug_assert!(self.falling.fits(&self.board), "placement collides");
         debug_assert!(self.falling.is_grounded(&self.board), "placement not resting");
         self.last_spin = p.spin;
-        self.lock_with(true, obs)
+        self.lock_with(true, &mut ())
     }
 
     /// Validate a placement against the current state without changing it.

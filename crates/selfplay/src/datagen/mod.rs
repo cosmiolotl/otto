@@ -16,7 +16,7 @@ use tetris_bot::nnue::{Features, bucket, extract};
 use tetris_bot::{BotSpec, Evaluator, HandEval, PathAcc};
 use tetris_sim::SplitMix;
 
-use crate::conditions::{Conditions, PairDraw};
+use crate::conditions::Conditions;
 use crate::game::play_game_with;
 use crate::schedule::derive_seed;
 use format::{DataWriter, Sample};
@@ -56,10 +56,9 @@ pub fn play_and_sample(cfg: &DatagenConfig, game: usize) -> (Vec<Sample>, Option
     let mut rng = SplitMix(derive_seed(&[cfg.seed, game as u64, 0xda7a]));
     let n = cfg.bots.len() as u64;
     let seats = [rng.below(n) as usize, rng.below(n) as usize];
-    let match_seed = rng.park_miller_seed();
-    let (fpp, mcfg) = cfg.cond.sample(&mut rng);
-    let draw = PairDraw { match_seed, fpp, bot_seeds: [rng.next_u64(), rng.next_u64()], cfg: mcfg };
-    let spec = draw.game(&cfg.bots[seats[0]], &cfg.bots[seats[1]], false, cfg.cond.max_pieces, false);
+    let draw = cfg.cond.draw_from(&mut rng);
+    let fpp = draw.fpp;
+    let spec = draw.game(&cfg.bots[seats[0]], &cfg.bots[seats[1]], false, false);
     let teachers = [teacher(&spec.bots[0]), teacher(&spec.bots[1])];
     let mut out: Vec<(usize, Sample)> = Vec::new();
     let g = play_game_with(&spec, |m, p, d| {

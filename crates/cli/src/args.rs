@@ -83,13 +83,10 @@ pub fn conditions(args: &Args, pps: [f64; 2]) -> Result<Conditions, CliError> {
     Ok(Conditions {
         pps: args.pair("--pps", pps)?,
         tl_fraction: if args.has("--varied") { varied.tl_fraction } else { 1.0 },
-        max_pieces: args.num("--max-pieces", MAX_PIECES)?,
+        max_pieces: args.num("--max-pieces", varied.max_pieces)?,
         ..varied
     })
 }
-
-/// Default total placements before a game is a draw, for every command.
-pub const MAX_PIECES: u32 = 2000;
 
 fn bad_pair(name: &str, s: &str) -> CliError {
     usage_error(format!("{name} {s}: expected one number or two separated by a comma"))

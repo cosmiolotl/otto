@@ -32,7 +32,7 @@ pub mod spec;
 pub mod weights;
 
 pub use bot::{Bot, BotStats, Decision};
-pub use controller::{Mode, Plan, Threat};
+pub use controller::{Mode, Plan};
 pub use eval::{AnyEval, Evaluator, HandEval, NnueEval, PathAcc};
 pub use hash::state_hash;
 pub use obs::{Observation, PlayerView};

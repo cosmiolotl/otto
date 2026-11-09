@@ -15,7 +15,6 @@ pub struct HeadToHead {
     pub pairs: usize,
     pub seed: u64,
     pub speed: FixedSpeed,
-    pub max_pieces: u32,
     /// Record the first `record` pairs as oracle requests.
     pub record: usize,
 }
@@ -25,7 +24,7 @@ impl HeadToHead {
         (0..self.pairs)
             .map(|i| {
                 let draw = self.speed.draw(self.seed ^ (i as u64).wrapping_mul(0xa076_1d64_78bd_642f));
-                Job::new((0, &self.a), (1, &self.b), &draw, self.max_pieces, i < self.record)
+                Job::new((0, &self.a), (1, &self.b), &draw, i < self.record)
             })
             .collect()
     }
@@ -92,8 +91,7 @@ mod tests {
             b: BotSpec::hand(weights::preset("steady").unwrap(), opts),
             pairs: 2,
             seed: 9,
-            speed: FixedSpeed { fpp: [24, 30], jitter: 1 },
-            max_pieces: 60,
+            speed: FixedSpeed { fpp: [24, 30], jitter: 1, max_pieces: 60 },
             record: 1,
         };
         let res = h.run();

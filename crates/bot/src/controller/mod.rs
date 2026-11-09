@@ -36,8 +36,7 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub const ALL: [Mode; 3] = [Mode::Build, Mode::Kill, Mode::Cancel];
-    pub const COUNT: usize = Mode::ALL.len();
+    pub const COUNT: usize = 3;
 
     pub const fn index(self) -> usize {
         self as usize
@@ -52,34 +51,15 @@ impl Mode {
     }
 }
 
-/// Root-level threat estimates (all in lines).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Threat {
-    /// `my_burst(k)`: most attack I can generate in the next k placements of the known queue.
-    pub my_burst: f32,
-    /// The same for the opponent (their known queue).
-    pub opp_burst: f32,
-    pub my_pending: f32,
-    pub opp_pending: f32,
-    /// Rows left before the visible top (20 - stack height).
-    pub my_margin: f32,
-    pub opp_margin: f32,
-    /// `opp_margin + opp_burst_scale · opp_burst`.
-    pub opp_absorb: f32,
-    /// `my_burst - my_pending + opp_pending - opp_absorb` (> `kill_threshold` ⇒ KILL).
-    pub kill_margin: f32,
-    /// `sigmoid((my_pending + opp_burst_scale · opp_burst - my_margin) / 3)`.
-    pub danger: f32,
-    /// How full the opponent is: `clamp((opp_height + opp_pending - 8) / 12, 0, 1)` (scales the value of
-    /// attack by `1 + pressure · opp_fill`).
-    pub opp_fill: f32,
-}
-
-/// What the controller decided for one move.
+/// What the controller decided for one move: the mode, and the two threat estimates the evaluation uses.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Plan {
     pub mode: Mode,
-    pub threat: Threat,
+    /// `my_burst(k)` of the opponent: the most attack they can generate in their known queue (lines).
+    pub opp_burst: f32,
+    /// How full the opponent is: `clamp((opp_height + opp_pending - 8) / 12, 0, 1)` (scales the value of
+    /// attack by `1 + pressure · opp_fill`).
+    pub opp_fill: f32,
 }
 
 fn sigmoid(x: f32) -> f32 {
@@ -97,18 +77,6 @@ pub fn decide(obs: &Observation, w: &Weights, burst: &mut Burst) -> Plan {
     let kill_margin = my_burst - my_pending + opp_pending - opp_absorb;
     let danger = sigmoid((my_pending + w.opp_burst_scale * opp_burst - my_margin) / 3.0);
     let opp_fill = ((obs.opp.board.top() as f32 + opp_pending - 8.0) / 12.0).clamp(0.0, 1.0);
-    let threat = Threat {
-        my_burst,
-        opp_burst,
-        my_pending,
-        opp_pending,
-        my_margin,
-        opp_margin,
-        opp_absorb,
-        kill_margin,
-        danger,
-        opp_fill,
-    };
     let mode = if kill_margin > w.kill_threshold {
         Mode::Kill
     } else if my_pending > 0.0 && danger > w.cancel_threshold {
@@ -116,5 +84,5 @@ pub fn decide(obs: &Observation, w: &Weights, burst: &mut Burst) -> Plan {
     } else {
         Mode::Build
     };
-    Plan { mode, threat }
+    Plan { mode, opp_burst, opp_fill }
 }

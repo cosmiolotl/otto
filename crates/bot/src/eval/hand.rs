@@ -60,7 +60,7 @@ impl Evaluator for HandEval {
     #[inline]
     fn eval(&self, s: &PlayerState, path: &PathAcc) -> f32 {
         let w = &self.weights;
-        let Plan { mode, threat } = self.plan;
+        let Plan { mode, opp_burst, opp_fill } = self.plan;
         let f = board_features(&s.board);
         let mut v = self.board_score(&f);
 
@@ -75,7 +75,7 @@ impl Evaluator for HandEval {
             v += w.combo * (s.chain.combo + 1) as f32;
         }
 
-        v += w.attack * (1.0 + w.pressure * threat.opp_fill) * path.attack
+        v += w.attack * (1.0 + w.pressure * opp_fill) * path.attack
             + w.sent * path.sent
             + w.cancelled * path.cancelled
             + w.tanked * path.tanked
@@ -91,7 +91,7 @@ impl Evaluator for HandEval {
         // Garbage still queued. With the controller on, the opponent's burst estimate is a spike that may
         // come at any time.
         let pending = s.garbage.size() as f32;
-        let spike = w.burst_danger * threat.opp_burst;
+        let spike = w.burst_danger * opp_burst;
         let d = (f.max_height as f32 + pending + spike - w.danger_level).max(0.0);
         v += w.pending * pending + w.danger_sq * d * d;
         v

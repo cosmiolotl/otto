@@ -22,11 +22,13 @@ pub struct PairDraw {
     pub fpp: [u32; 2],
     pub bot_seeds: [u64; 2],
     pub cfg: &'static Config,
+    /// Total placements (both players) before a game is a draw.
+    pub max_pieces: u32,
 }
 
 impl PairDraw {
     /// The game with bot A in seat 0 (`swapped`: in seat 1). Each bot keeps its own speed and RNG seed.
-    pub fn game(&self, a: &BotSpec, b: &BotSpec, swapped: bool, max_pieces: u32, record_keys: bool) -> GameSpec {
+    pub fn game(&self, a: &BotSpec, b: &BotSpec, swapped: bool, record_keys: bool) -> GameSpec {
         let seat = |x: [u32; 2]| if swapped { [x[1], x[0]] } else { x };
         let bot_seeds = if swapped { [self.bot_seeds[1], self.bot_seeds[0]] } else { self.bot_seeds };
         GameSpec {
@@ -34,7 +36,7 @@ impl PairDraw {
             bots: if swapped { [b.clone(), a.clone()] } else { [a.clone(), b.clone()] },
             fpp: seat(self.fpp),
             bot_seeds,
-            max_pieces,
+            max_pieces: self.max_pieces,
             record_keys,
             cfg: self.cfg,
         }
@@ -67,7 +69,7 @@ impl Default for Conditions {
             garbage_speed: [10, 30],
             messiness_change: [0.5, 1.0],
             messiness_within: [0.0, 0.3],
-            max_pieces: 1600,
+            max_pieces: 2000,
         }
     }
 }
@@ -79,15 +81,19 @@ impl Conditions {
     }
 
     pub fn draw(&self, seed: u64) -> PairDraw {
-        let mut rng = SplitMix(seed);
+        self.draw_from(&mut SplitMix(seed))
+    }
+
+    /// [`Conditions::draw`] continuing an existing RNG stream.
+    pub fn draw_from(&self, rng: &mut SplitMix) -> PairDraw {
         let match_seed = rng.park_miller_seed();
-        let (fpp, cfg) = self.sample(&mut rng);
+        let (fpp, cfg) = self.sample(rng);
         let bot_seeds = [rng.next_u64(), rng.next_u64()];
-        PairDraw { match_seed, fpp, bot_seeds, cfg }
+        PairDraw { match_seed, fpp, bot_seeds, cfg, max_pieces: self.max_pieces }
     }
 
     /// Frames per piece of bot A and bot B, and the config.
-    pub fn sample(&self, rng: &mut SplitMix) -> ([u32; 2], &'static Config) {
+    pub(crate) fn sample(&self, rng: &mut SplitMix) -> ([u32; 2], &'static Config) {
         let mut fpp = || fpp_of_pps(self.pps[0] + (self.pps[1] - self.pps[0]) * rng.unit_f64());
         let f = [fpp(), fpp()];
         if rng.unit_f64() < self.tl_fraction {
@@ -116,6 +122,7 @@ impl Conditions {
 pub struct FixedSpeed {
     pub fpp: [u32; 2],
     pub jitter: u32,
+    pub max_pieces: u32,
 }
 
 impl FixedSpeed {
@@ -129,7 +136,7 @@ impl FixedSpeed {
         };
         let fpp = [jit(self.fpp[0]), jit(self.fpp[1])];
         let bot_seeds = [rng.next_u64(), rng.next_u64()];
-        PairDraw { match_seed, fpp, bot_seeds, cfg: Config::tl() }
+        PairDraw { match_seed, fpp, bot_seeds, cfg: Config::tl(), max_pieces: self.max_pieces }
     }
 }
 
@@ -151,7 +158,7 @@ mod tests {
 
     #[test]
     fn fixed_speed_jitters_within_bounds() {
-        let s = FixedSpeed { fpp: [24, 30], jitter: 1 };
+        let s = FixedSpeed { fpp: [24, 30], jitter: 1, max_pieces: 100 };
         for seed in 0..50 {
             let d = s.draw(seed);
             assert!((23..=25).contains(&d.fpp[0]) && (29..=31).contains(&d.fpp[1]), "{:?}", d.fpp);

@@ -29,13 +29,13 @@ pub fn bot_vs_bot(args: &Args) -> CmdResult {
     let b = BotSpec::load(args.get("--b").unwrap_or("default"), opts_b)?;
     let games: usize = args.num("--games", 100)?;
     let seed: u64 = args.num("--seed", 1)?;
-    let max_pieces: u32 = args.num("--max-pieces", crate::args::MAX_PIECES)?;
+    let max_pieces: u32 = args.num("--max-pieces", tetris_selfplay::Conditions::default().max_pieces)?;
     let jitter: u32 = args.num("--jitter", 1)?;
     let fpp = args.pair("--pps", [2.5, 2.5])?.map(fpp_of_pps);
     let dump_dir = args.get("--dump-requests");
     let dump: usize = args.num("--dump", if dump_dir.is_some() { 3 } else { 0 })?;
     let pairs = games.div_ceil(2);
-    let h = HeadToHead { a, b, pairs, seed, speed: FixedSpeed { fpp, jitter }, max_pieces, record: dump.div_ceil(2) };
+    let h = HeadToHead { a, b, pairs, seed, speed: FixedSpeed { fpp, jitter, max_pieces }, record: dump.div_ceil(2) };
     for (side, o) in [("A", &opts_a), ("B", &opts_b)] {
         if o.extra_plies > 0 {
             println!(

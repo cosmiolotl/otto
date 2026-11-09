@@ -166,7 +166,7 @@ pub fn diff_trace_file(path: &Path) -> Result<DiffReport, ReplayError> {
     Ok(diff_traces(&name, &oracle, &sim))
 }
 
-/// All `*.json` files in `dir`, sorted.
+/// All `*.json` files in `dir`, sorted (trace directories; also weights pools for `sim tournament`).
 pub fn trace_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut v = Vec::new();
     for e in std::fs::read_dir(dir)? {

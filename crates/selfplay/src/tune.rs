@@ -264,7 +264,7 @@ fn run_tune(cfg: &TuneConfig) -> Result<TuneState, String> {
                 for k in 0..cfg.pairs {
                     let seed = derive_seed(&[cfg.seed, g, o as u64, k as u64]);
                     let draw = cfg.conditions.draw(seed);
-                    jobs.push(Job::new((c, cand), (lambda + o, opp), &draw, cfg.conditions.max_pieces, false));
+                    jobs.push(Job::new((c, cand), (lambda + o, opp), &draw, false));
                 }
             }
         }
@@ -364,7 +364,7 @@ pub fn evaluate(mean: &Weights, fixed: &[Weights], cfg: &TuneConfig) -> (Vec<(St
     for (o, opp) in opps.iter().enumerate() {
         for k in 0..cfg.eval_pairs {
             let draw = cfg.conditions.draw(derive_seed(&[cfg.seed, 0xe7a1, k as u64]));
-            jobs.push(Job::new((0, &me), (1 + o, opp), &draw, cfg.conditions.max_pieces, false));
+            jobs.push(Job::new((0, &me), (1 + o, opp), &draw, false));
         }
     }
     let res = run(&jobs);
@@ -385,13 +385,7 @@ pub fn oracle_game(w: &Weights, opp: &Weights, cfg: &TuneConfig, generation: u64
     let opts = cfg.opts();
     let cond = Conditions::tl(2.5, cfg.conditions.max_pieces);
     let draw = cond.draw(derive_seed(&[cfg.seed, 0x07ac1e, generation]));
-    let job = Job::new(
-        (0, &BotSpec::hand(w.clone(), opts)),
-        (1, &BotSpec::hand(opp.clone(), opts)),
-        &draw,
-        cond.max_pieces,
-        true,
-    );
+    let job = Job::new((0, &BotSpec::hand(w.clone(), opts)), (1, &BotSpec::hand(opp.clone(), opts)), &draw, true);
     play_game(&job.games[0]).request.expect("recorded")
 }
 

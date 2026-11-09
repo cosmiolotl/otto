@@ -28,8 +28,8 @@ pub struct Job {
 impl Job {
     /// Both games of a pair: the same match seed and rules; each bot keeps its own frames per piece and
     /// RNG seed across the swap, so the seating is the only difference.
-    pub fn new(a: (usize, &BotSpec), b: (usize, &BotSpec), draw: &PairDraw, max_pieces: u32, record: bool) -> Job {
-        let game = |swapped| draw.game(a.1, b.1, swapped, max_pieces, record);
+    pub fn new(a: (usize, &BotSpec), b: (usize, &BotSpec), draw: &PairDraw, record: bool) -> Job {
+        let game = |swapped| draw.game(a.1, b.1, swapped, record);
         Job { a: a.0, b: b.0, games: [game(false), game(true)] }
     }
 }
@@ -84,7 +84,7 @@ mod tests {
         let a = BotSpec::hand(weights::preset("default").unwrap(), opts);
         let b = BotSpec::hand(weights::preset("steady").unwrap(), opts);
         let draw = Conditions::default().draw(derive_seed(&[1, 2]));
-        let j = Job::new((0, &a), (1, &b), &draw, 100, false);
+        let j = Job::new((0, &a), (1, &b), &draw, false);
         let [g0, g1] = &j.games;
         assert_eq!(g0.seed, g1.seed);
         assert_eq!(g0.fpp, [g1.fpp[1], g1.fpp[0]]);

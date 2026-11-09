@@ -67,7 +67,7 @@ pub fn run_tournament(t: &Tournament) -> TournamentResult {
         for b in a + 1..n {
             for k in 0..t.pairs {
                 let draw = t.cond.draw(derive_seed(&[t.seed, k as u64]));
-                jobs.push(Job::new((a, &t.bots[a]), (b, &t.bots[b]), &draw, t.cond.max_pieces, false));
+                jobs.push(Job::new((a, &t.bots[a]), (b, &t.bots[b]), &draw, false));
             }
         }
     }
