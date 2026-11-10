@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "web/engine"]
 
 [workspace.package]
 edition = "2024"
@@ -19,6 +19,13 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 debug = 1
 codegen-units = 1
 lto = "thin"
+
+# The browser build (web/engine): small and fast, no debug info.
+[profile.wasm]
+inherits = "release"
+debug = 0
+lto = "fat"
+panic = "abort"
 
 [profile.bench]
 debug = 1

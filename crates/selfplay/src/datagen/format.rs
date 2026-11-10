@@ -14,12 +14,15 @@
 //!   | 13 | u8 | teacher's controller mode (0 BUILD, 1 KILL, 2 CANCEL) |
 //!   | 14 | u16 | pieces the side to move had placed |
 //!   | 16 | u16 | pieces the side to move still placed before the game ended |
-//!   | 18 | u16 | reserved (0) |
-//!   | 20 | f32 | teacher's search score of the chosen move |
-//!   | 24 | f32 | teacher's static evaluation of the position (no path terms) |
+//!   | 18 | u16 | sibling: 0 for a decision; k ≥ 1 for its k-th sibling, bit 15 ([`CHOSEN`]) if it is the bot's move |
+//!   | 20 | f32 | decision: the bot's search score of its move; sibling: the teacher's score of the child |
+//!   | 24 | f32 | decision: the teacher's static evaluation (no path terms); sibling: as offset 20 |
 //!   | 28 | u32 | game index within the file |
 //!
-//! - `STEM.json`: `{"format": 1, "samples": N, "features": F, "meta_bytes": 32, "settings": {..},
+//!   Siblings (`sim datagen --siblings K`) follow their decision record directly. They are one-ply children
+//!   (after the lock, from the side to move's view) and share the decision's result, mode, ply and game.
+//!
+//! - `STEM.json`: `{"format": 2, "samples": N, "decisions": D, "features": F, "meta_bytes": 32, "settings": {..},
 //!   "layout": <tetris_bot::nnue::layout_json()>}`. The layout is written verbatim: the trainer hashes it to match
 //!   network files ([`tetris_bot::nnue::file::layout_hash`]).
 
@@ -30,7 +33,11 @@ use std::path::{Path, PathBuf};
 use tetris_bot::nnue::{Features, layout_json};
 
 pub const META_BYTES: usize = 32;
-pub const DATA_FORMAT: u32 = 1;
+/// 2: offset 18 holds the sibling field (it was reserved and 0 in format 1, which therefore reads as a
+/// data set of decisions only).
+pub const DATA_FORMAT: u32 = 2;
+/// Bit of [`Sample::sib`] marking the sibling the bot played.
+pub const CHOSEN: u16 = 1 << 15;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Sample {
@@ -46,6 +53,8 @@ pub struct Sample {
     pub search_score: f32,
     pub static_score: f32,
     pub game: u32,
+    /// 0: a decision; k ≥ 1: its k-th sibling (| [`CHOSEN`]).
+    pub sib: u16,
 }
 
 pub struct DataWriter {
@@ -54,6 +63,7 @@ pub struct DataWriter {
     feat: BufWriter<File>,
     offset: u64,
     samples: u64,
+    decisions: u64,
     settings: serde_json::Value,
 }
 
@@ -78,6 +88,7 @@ impl DataWriter {
             stem,
             offset: 0,
             samples: 0,
+            decisions: 0,
             settings,
         })
     }
@@ -93,6 +104,7 @@ impl DataWriter {
         m[13] = s.mode;
         m[14..16].copy_from_slice(&s.ply.to_le_bytes());
         m[16..18].copy_from_slice(&s.to_end.to_le_bytes());
+        m[18..20].copy_from_slice(&s.sib.to_le_bytes());
         m[20..24].copy_from_slice(&s.search_score.to_le_bytes());
         m[24..28].copy_from_slice(&s.static_score.to_le_bytes());
         m[28..32].copy_from_slice(&s.game.to_le_bytes());
@@ -102,6 +114,7 @@ impl DataWriter {
         }
         self.offset += (s.me.len + s.opp.len) as u64;
         self.samples += 1;
+        self.decisions += (s.sib == 0) as u64;
         Ok(())
     }
 
@@ -110,8 +123,9 @@ impl DataWriter {
         self.meta.flush()?;
         self.feat.flush()?;
         let json = format!(
-            "{{\"format\": {DATA_FORMAT}, \"samples\": {}, \"features\": {}, \"meta_bytes\": {META_BYTES}, \"settings\": {}, \"layout\": {}}}\n",
+            "{{\"format\": {DATA_FORMAT}, \"samples\": {}, \"decisions\": {}, \"features\": {}, \"meta_bytes\": {META_BYTES}, \"settings\": {}, \"layout\": {}}}\n",
             self.samples,
+            self.decisions,
             self.offset,
             self.settings,
             layout_json()
@@ -175,6 +189,7 @@ mod tests {
             search_score: 1.5,
             static_score: -2.0,
             game: 0,
+            sib: 0,
         };
         extract(&a, 24, &mut s.me);
         extract(&b, 25, &mut s.opp);

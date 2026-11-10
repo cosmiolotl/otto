@@ -85,7 +85,7 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "datagen",
         args: "--bots a,b,.. --games N --out STEM [--width W] [--every K] [--seed S] [--pps lo,hi] [--varied]\n\
-               [--max-pieces P] [--batch B]",
+               [--max-pieces P] [--batch B] [--siblings K] [--teacher WEIGHTS]",
         about: "value-net training data (docs/NNUE.md)",
         run: nnue_cmds::datagen,
     },

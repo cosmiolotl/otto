@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use tetris_bot::nnue::Network;
-use tetris_bot::{BotSpec, SearchOptions};
+use tetris_bot::{BotSpec, SearchOptions, weights};
 use tetris_selfplay::datagen::format::read_samples;
 use tetris_selfplay::datagen::{DatagenConfig, run};
 
@@ -27,11 +27,13 @@ pub fn datagen(args: &Args) -> CmdResult {
         every: args.num("--every", 2)?,
         out: PathBuf::from(out),
         batch: args.num("--batch", 64)?,
+        siblings: args.num("--siblings", 0)?,
+        teacher: args.get("--teacher").map(weights::load).transpose()?,
     };
     let t = run(&cfg).map_err(|e| format!("{out}: {e}"))?;
     println!(
-        "datagen: {} games ({} / {} wins by seat, {} draws), {} samples -> {out}.{{meta,feat,json}}",
-        t.games, t.wins[0], t.wins[1], t.draws, t.samples
+        "datagen: {} games ({} / {} wins by seat, {} draws), {} decisions, {} samples -> {out}.{{meta,feat,json}}",
+        t.games, t.wins[0], t.wins[1], t.draws, t.decisions, t.samples
     );
     Ok(())
 }

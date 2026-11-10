@@ -4,7 +4,8 @@
 
 `teacher` is the hand-written static evaluation or the search score recorded by `sim datagen`; (a, c) are
 fitted by logistic regression of z on the teacher score, so the teacher is expressed as a win probability
-(Stockfish's "eval → WDL" scaling). `lam = 0` trains on outcomes only.
+(Stockfish's "eval → WDL" scaling). `lam = 0` trains on outcomes only. The fit is done regardless: `a` also scales the sibling ranking target
+(train.py).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .data import Batch, DataSet, is_val, outcome
+from .data import Batch, DataSet, is_root, is_val, outcome
 
 TEACHERS = ("static", "search")
 SCORE_CLAMP = 1e4
@@ -30,13 +31,14 @@ class Target:
 
     @staticmethod
     def fit(sets: list[DataSet], lam: float, teacher: str, n: int = 1_000_000, seed: int = 0) -> "Target":
-        """Fit (a, c) on up to `n` decisive training samples (nothing to fit when `lam = 0`)."""
+        """Fit (a, c) on up to `n` decisive training decisions (siblings are not positions of the game)."""
         if teacher not in TEACHERS:
             raise ValueError(f"teacher {teacher!r} not in {TEACHERS}")
-        if lam <= 0:
-            return Target(lam, teacher)
-        m = np.concatenate([np.array(s.meta) for s in sets])
-        m = m[(m["result"] != 0) & ~is_val(m)]
+        parts = []
+        for s in sets:
+            m = np.array(s.meta)
+            parts.append(m[(m["result"] != 0) & ~is_val(m) & is_root(m)])
+        m = np.concatenate(parts)
         if len(m) == 0:
             raise ValueError("no decisive training samples to fit the teacher on (use lam = 0)")
         m = m[np.random.default_rng(seed).permutation(len(m))[:n]]
@@ -56,7 +58,7 @@ class Target:
         return Target(lam, teacher, float(p[0].detach() / s), float(p[1].detach()))
 
     def __call__(self, b: Batch) -> torch.Tensor:
-        """Targets for a batch of tensors."""
+        """Value targets for a batch of tensors (meaningful for its decision records)."""
         if self.lam <= 0:
             return b.result
         score = getattr(b, f"{self.teacher}_score")

@@ -1,7 +1,5 @@
 //! The bot: observation → evaluator plan (release controller) → beam search → placement.
 
-use std::time::Instant;
-
 use tetris_sim::{PieceQueue, Placement, SplitMix};
 
 use crate::controller::Mode;
@@ -58,7 +56,7 @@ impl<E: Evaluator> Bot<E> {
 
     /// Choose a placement. `None` only if the current piece has no placement at all.
     pub fn choose(&mut self, obs: &Observation) -> Option<Decision> {
-        let t0 = Instant::now();
+        let t0 = clock::now();
         let root = obs.me.hypothetical(&mut self.rng);
         let plan = self.eval.begin(obs);
         self.tails.clear();
@@ -70,7 +68,34 @@ impl<E: Evaluator> Bot<E> {
         let r = self.search.run(&root, obs.my_fpp, &self.eval, &self.opts, &self.tails)?;
         self.stats.moves += 1;
         self.stats.modes[plan.mode.index()] += 1;
-        self.stats.think_ns += t0.elapsed().as_nanos() as u64;
+        self.stats.think_ns += clock::elapsed_ns(t0);
         Some(Decision { placement: r.placement, mode: plan.mode, score: r.score, nodes: r.nodes })
+    }
+}
+
+/// Think-time clock. `std::time::Instant` panics on `wasm32-unknown-unknown` (no clock), so there the
+/// bot does not time itself and `think_ns` stays 0; the browser client measures around the call instead.
+mod clock {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn now() -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn elapsed_ns(t0: std::time::Instant) -> u64 {
+        t0.elapsed().as_nanos() as u64
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub struct Stamp;
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn now() -> Stamp {
+        Stamp
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn elapsed_ns(_: Stamp) -> u64 {
+        0
     }
 }

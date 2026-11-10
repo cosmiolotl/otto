@@ -1,4 +1,9 @@
-"""`sim datagen` data sets (crates/selfplay/src/datagen/format.rs) and a chunked, shuffled batch loader."""
+"""`sim datagen` data sets (crates/selfplay/src/datagen/format.rs) and a chunked, shuffled batch loader.
+
+A data set holds decision records and, in format 2, sibling records: one-ply children of a decision that
+directly follow it (`sib` = 1..K, bit 15 set on the child the bot played). The loader keeps each decision
+and its siblings together (a *group*) in one batch.
+"""
 
 from __future__ import annotations
 
@@ -20,14 +25,15 @@ META = np.dtype(
         ("mode", "u1"),
         ("ply", "<u2"),
         ("to_end", "<u2"),
-        ("reserved", "<u2"),
+        ("sib", "<u2"),
         ("search_score", "<f4"),
         ("static_score", "<f4"),
         ("game", "<u4"),
     ]
 )
 assert META.itemsize == 32
-DATA_FORMAT = 1
+DATA_FORMATS = (1, 2)  # format 1 has no siblings (its `sib` field is always 0)
+CHOSEN = 1 << 15
 
 # Every `VAL_EVERY`-th game is validation data, so positions of one game never straddle the split.
 VAL_EVERY = 20
@@ -35,6 +41,11 @@ VAL_EVERY = 20
 
 def is_val(meta: np.ndarray) -> np.ndarray:
     return (meta["game"] % VAL_EVERY) == 0
+
+
+def is_root(meta: np.ndarray) -> np.ndarray:
+    """Decision records (the rest are siblings)."""
+    return meta["sib"] == 0
 
 
 def outcome(meta: np.ndarray) -> np.ndarray:
@@ -46,9 +57,10 @@ class DataSet:
     def __init__(self, stem: str | Path):
         self.header, self.layout = read_header(stem)
         h = self.header
-        if (h["format"], h["meta_bytes"]) != (DATA_FORMAT, META.itemsize):
+        if h["format"] not in DATA_FORMATS or h["meta_bytes"] != META.itemsize:
             raise ValueError(f"{stem}: data format {h['format']} with {h['meta_bytes']}-byte records, "
-                             f"trainer reads format {DATA_FORMAT} with {META.itemsize}-byte records")
+                             f"trainer reads formats {DATA_FORMATS} with {META.itemsize}-byte records")
+        self.siblings = int(h.get("settings", {}).get("siblings", 0))
         self.meta = np.memmap(f"{stem}.meta", dtype=META, mode="r")
         self.feat = np.memmap(f"{stem}.feat", dtype="<u2", mode="r")
         if (len(self.meta), len(self.feat)) != (h["samples"], h["features"]):
@@ -75,13 +87,18 @@ class Batch:
     result: np.ndarray  # float32 in {0, 0.5, 1}
     static_score: np.ndarray  # float32
     search_score: np.ndarray
+    root: np.ndarray  # int64 positions of the decision records (value loss)
+    grp: np.ndarray  # int64 per sibling: its group, 0..G-1
+    pos: np.ndarray  # int64 per sibling: its position in the group, 0..K-1
+    sib_idx: np.ndarray  # int64 per sibling: its position in the batch
+    chosen: np.ndarray  # float32 per sibling: 1 for the bot's move
 
     def to(self, dev):
         """The same batch as torch tensors on `dev` (indices int64, the rest float32)."""
         import torch
 
         def t(name, a):
-            dt = torch.long if name in ("me_idx", "me_off", "opp_idx", "opp_off", "bucket") else torch.float32
+            dt = torch.float32 if a.dtype.kind == "f" else torch.long
             return torch.from_numpy(np.ascontiguousarray(a)).to(dev, dt, non_blocking=True)
 
         return Batch(**{f.name: t(f.name, getattr(self, f.name)) for f in fields(self)})
@@ -102,6 +119,9 @@ def make_batch(feat: np.ndarray, m: np.ndarray, swap: np.ndarray | None = None) 
     me_len, opp_len = m["n_me"], m["n_opp"]
     bucket = m["bucket_me"].astype(np.int64)
     result = outcome(m)
+    root = is_root(m)
+    if swap is not None:
+        swap = swap & root  # a sibling's perspective is the search's: never swapped
     if swap is not None and swap.any():
         me_start, opp_start = np.where(swap, opp_start, me_start), np.where(swap, me_start, opp_start)
         me_len, opp_len = np.where(swap, opp_len, me_len), np.where(swap, me_len, opp_len)
@@ -109,18 +129,29 @@ def make_batch(feat: np.ndarray, m: np.ndarray, swap: np.ndarray | None = None) 
         result = np.where(swap, 1.0 - result, result).astype(np.float32)
     me_idx, me_off = _gather(feat, me_start, me_len)
     opp_idx, opp_off = _gather(feat, opp_start, opp_len)
+    sib = ~root
+    gid = np.cumsum(root) - 1
+    if sib.any() and gid[np.flatnonzero(sib)[0]] < 0:
+        raise ValueError("a batch starts with a sibling record (groups must stay whole)")
+    _, grp = np.unique(gid[sib], return_inverse=True)
     return Batch(
         me_idx, me_off, opp_idx, opp_off, bucket, result,
         m["static_score"].astype(np.float32), m["search_score"].astype(np.float32),
+        np.flatnonzero(root).astype(np.int64), grp.astype(np.int64).reshape(-1),
+        ((m["sib"][sib] & ~np.uint16(CHOSEN)).astype(np.int64) - 1), np.flatnonzero(sib).astype(np.int64),
+        ((m["sib"][sib] & CHOSEN) != 0).astype(np.float32),
     )
 
 
 class Loader:
     """Iterates batches of the train or validation split ([`is_val`]) of several data sets.
 
-    Each epoch visits contiguous chunks of `chunk` samples in random order (file-friendly), shuffles inside
-    a buffer of `buffer_chunks` chunks, and yields batches.
+    Each epoch visits contiguous chunks of about `chunk` samples in random order (file-friendly), shuffles
+    the groups inside a buffer of `buffer_chunks` chunks, and yields batches of about `batch` records cut at
+    group boundaries. Chunks start at a decision record and end before one.
     """
+
+    GROUP_MAX = 1024  # more records than any group
 
     def __init__(self, sets: list[DataSet], batch: int, train: bool, chunk: int = 1 << 18, buffer_chunks: int = 8,
                  swap_prob: float = 0.0, seed: int = 0):
@@ -146,7 +177,13 @@ class Loader:
             parts = []
             for si, a in order[i : i + self.buffer_chunks]:
                 s = self.sets[si]
-                m = np.array(s.meta[a : a + self.chunk])
+                m = np.array(s.meta[a : a + self.chunk + self.GROUP_MAX])
+                r = np.flatnonzero(is_root(m))
+                if len(r) == 0:
+                    continue
+                end = r[r >= self.chunk][0] if (r >= self.chunk).any() else (
+                    len(m) if a + len(m) >= len(s) else r[-1])
+                m = m[r[0] : end]
                 m = m[self._keep(m)]
                 if len(m) == 0:
                     continue
@@ -166,10 +203,18 @@ class Loader:
                 metas.append(m)
             feat = np.concatenate(feats)
             meta = np.concatenate(metas)
+            root = is_root(meta)
             if self.train:
-                meta = meta[self.rng.permutation(len(meta))]
-            for b in range(0, len(meta), self.batch):
-                mb = meta[b : b + self.batch]
+                gid = np.cumsum(root) - 1
+                meta = meta[np.argsort(self.rng.permutation(int(root.sum()))[gid], kind="stable")]
+                root = is_root(meta)
+            starts = np.flatnonzero(root)
+            b = 0
+            while b < len(meta):
+                k = np.searchsorted(starts, b + self.batch)
+                e = int(starts[k]) if k < len(starts) else len(meta)
+                mb = meta[b:e]
+                b = e
                 if self.train and len(mb) < self.batch // 2:
                     continue
                 swap = self.rng.random(len(mb)) < self.swap_prob if self.swap_prob > 0 else None

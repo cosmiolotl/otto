@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Play modern versus Tetris against Otto, a beam-search engine running in your browser as WebAssembly." />
+    <meta name="theme-color" content="#121212" />
+    <title>Otto · Versus</title>
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <main class="arena">
+        <header class="page-header">
+          <div class="title">
+            <h1>You vs Otto</h1>
+            <p class="sub">
+              Tetra League S2 rules · seed <code id="seed">—</code> · session
+              <span class="score"><span id="wins-0">0</span> – <span id="wins-1">0</span></span>
+            </p>
+          </div>
+          <button id="restart" class="btn" type="button"></button>
+          <button id="forfeit" class="btn btn-danger" type="button"></button>
+        </header>
+        <section class="stage" id="stage"></section>
+      </main>
+      <aside class="settings" id="settings" aria-label="Settings"></aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

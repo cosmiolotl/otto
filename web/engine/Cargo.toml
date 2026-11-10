@@ -1,0 +1,19 @@
+[package]
+name = "otto-wasm"
+description = "WebAssembly bindings for web/: a real-time versus match against Otto, and the bot itself"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "otto_wasm"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tetris-sim = { path = "../../crates/sim", default-features = false }
+tetris-bot = { path = "../../crates/bot" }
+serde_json = { workspace = true }
+# Must match the installed `wasm-bindgen` CLI exactly (web/scripts/build-wasm.mjs checks this).
+wasm-bindgen = "=0.2.130"
