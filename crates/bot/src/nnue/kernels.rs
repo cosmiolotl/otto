@@ -1,41 +1,39 @@
 //! The three hot kernels of the forward pass (accumulator refresh, pairwise activation, u8 × i8 dot
 //! product), behind one trait so the layer structure in `net.rs` is written once.
 //!
-//! [`Scalar`] is plain fixed-size array loops that LLVM vectorises for the build target. On x86-64,
-//! [`avx2`] has explicit AVX2 versions and the AVX2-compiled entry points `net.rs` dispatches to at run
-//! time.
+//! Every kernel is generic over its (compile-time) length; `net.rs` dispatches on the network's width once
+//! per call, so each supported width gets fully unrolled code. [`Scalar`] is plain fixed-size array loops
+//! that LLVM vectorises for the build target. On x86-64, [`avx2`] has explicit AVX2 versions and the
+//! AVX2-compiled entry points `net.rs` dispatches to at run time.
 
-use super::net::{Accumulator, FT_Q, HALF, L1, SideOut};
+use super::net::FT_Q;
 
 pub(super) trait Kernels {
-    fn refresh(ft_b: &Accumulator, ft_w: &[i16], feats: &[u16], acc: &mut Accumulator);
-    fn pairwise(acc: &Accumulator, out: &mut SideOut);
+    /// `acc = ft_b + Σ rows of ft_w` (rows are `L` long).
+    fn refresh<const L: usize>(ft_b: &[i16; L], ft_w: &[i16], feats: &[u16], acc: &mut [i16; L]);
+    /// `out[i] = clamp(a[i]) · clamp(b[i]) >> 9`.
+    fn pairwise<const H: usize>(a: &[i16; H], b: &[i16; H], out: &mut [u8; H]);
     fn dot<const N: usize>(x: &[u8; N], w: &[i8; N]) -> i32;
 }
 
 pub(super) struct Scalar;
 
-#[inline(always)]
-fn row_of(ft_w: &[i16], f: u16) -> &[i16; L1] {
-    let i = f as usize * L1;
-    ft_w[i..i + L1].try_into().unwrap()
-}
-
 impl Kernels for Scalar {
     #[inline(always)]
-    fn refresh(ft_b: &Accumulator, ft_w: &[i16], feats: &[u16], acc: &mut Accumulator) {
-        acc.0 = ft_b.0;
+    fn refresh<const L: usize>(ft_b: &[i16; L], ft_w: &[i16], feats: &[u16], acc: &mut [i16; L]) {
+        *acc = *ft_b;
         for &f in feats {
-            for (a, w) in acc.0.iter_mut().zip(row_of(ft_w, f)) {
+            let i = f as usize * L;
+            let row: &[i16; L] = ft_w[i..i + L].try_into().unwrap();
+            for (a, w) in acc.iter_mut().zip(row) {
                 *a = a.wrapping_add(*w);
             }
         }
     }
 
     #[inline(always)]
-    fn pairwise(acc: &Accumulator, out: &mut SideOut) {
-        let (a, b) = acc.0.split_at(HALF);
-        for i in 0..HALF {
+    fn pairwise<const H: usize>(a: &[i16; H], b: &[i16; H], out: &mut [u8; H]) {
+        for i in 0..H {
             let x = a[i].clamp(0, FT_Q as i16) as u32;
             let y = b[i].clamp(0, FT_Q as i16) as u32;
             out[i] = ((x * y) >> 9) as u8;
@@ -52,14 +50,14 @@ impl Kernels for Scalar {
     }
 }
 
-/// Explicit AVX2 kernels. The accumulator is kept in registers while feature rows are added (two tiles of
+/// Explicit AVX2 kernels. The accumulator is kept in registers while feature rows are added (tiles of
 /// 8 × 16 lanes), the pairwise product uses `mullo` + shift + `packus`, and the dot products use
 /// `maddubs` (u8 × i8 → i16 pairs; inputs ≤ 127 so the pair sums cannot saturate) + `madd`.
 #[cfg(target_arch = "x86_64")]
 pub(super) mod avx2 {
     use std::arch::x86_64::*;
 
-    use super::super::net::{self, Network};
+    use super::super::net::{self, Network, SideOut};
     use super::*;
 
     const TILE: usize = 128; // i16 lanes per register tile (8 registers)
@@ -70,15 +68,15 @@ pub(super) mod avx2 {
 
     impl Kernels for Avx2 {
         #[inline(always)]
-        fn refresh(ft_b: &Accumulator, ft_w: &[i16], feats: &[u16], acc: &mut Accumulator) {
+        fn refresh<const L: usize>(ft_b: &[i16; L], ft_w: &[i16], feats: &[u16], acc: &mut [i16; L]) {
             // SAFETY: see `Avx2`.
             unsafe { refresh(ft_b, ft_w, feats, acc) }
         }
 
         #[inline(always)]
-        fn pairwise(acc: &Accumulator, out: &mut SideOut) {
+        fn pairwise<const H: usize>(a: &[i16; H], b: &[i16; H], out: &mut [u8; H]) {
             // SAFETY: see `Avx2`.
-            unsafe { pairwise(acc, out) }
+            unsafe { pairwise(a, b, out) }
         }
 
         #[inline(always)]
@@ -99,22 +97,23 @@ pub(super) mod avx2 {
     }
 
     #[target_feature(enable = "avx2")]
-    fn refresh(ft_b: &Accumulator, ft_w: &[i16], feats: &[u16], acc: &mut Accumulator) {
+    fn refresh<const L: usize>(ft_b: &[i16; L], ft_w: &[i16], feats: &[u16], acc: &mut [i16; L]) {
+        const { assert!(L % TILE == 0) };
         for f in feats {
-            assert!((*f as usize + 1) * L1 <= ft_w.len());
+            assert!((*f as usize + 1) * L <= ft_w.len());
         }
-        for t in 0..L1 / TILE {
+        for t in 0..L / TILE {
             // SAFETY: every row index was bounds-checked above; unaligned loads/stores.
             unsafe {
-                let bp = ft_b.0.as_ptr().add(t * TILE) as *const __m256i;
+                let bp = ft_b.as_ptr().add(t * TILE) as *const __m256i;
                 let mut r: [__m256i; 8] = std::array::from_fn(|k| _mm256_loadu_si256(bp.add(k)));
                 for &f in feats {
-                    let wp = ft_w.as_ptr().add(f as usize * L1 + t * TILE) as *const __m256i;
+                    let wp = ft_w.as_ptr().add(f as usize * L + t * TILE) as *const __m256i;
                     for (k, reg) in r.iter_mut().enumerate() {
                         *reg = _mm256_add_epi16(*reg, _mm256_loadu_si256(wp.add(k)));
                     }
                 }
-                let ap = acc.0.as_mut_ptr().add(t * TILE) as *mut __m256i;
+                let ap = acc.as_mut_ptr().add(t * TILE) as *mut __m256i;
                 for (k, reg) in r.iter().enumerate() {
                     _mm256_storeu_si256(ap.add(k), *reg);
                 }
@@ -123,19 +122,20 @@ pub(super) mod avx2 {
     }
 
     #[target_feature(enable = "avx2")]
-    fn pairwise(acc: &Accumulator, out: &mut SideOut) {
-        // SAFETY: fixed-size arrays; HALF is a multiple of 32.
+    fn pairwise<const H: usize>(a: &[i16; H], b: &[i16; H], out: &mut [u8; H]) {
+        const { assert!(H % 32 == 0) };
+        // SAFETY: fixed-size arrays; H is a multiple of 32.
         unsafe {
             let zero = _mm256_setzero_si256();
             let max = _mm256_set1_epi16(FT_Q as i16);
-            let p = acc.0.as_ptr() as *const __m256i;
+            let (pa, pb) = (a.as_ptr() as *const __m256i, b.as_ptr() as *const __m256i);
             let q = out.as_mut_ptr() as *mut __m256i;
             let prod = |i: usize| {
-                let a = _mm256_min_epi16(_mm256_max_epi16(_mm256_loadu_si256(p.add(i)), zero), max);
-                let b = _mm256_min_epi16(_mm256_max_epi16(_mm256_loadu_si256(p.add(HALF / 16 + i)), zero), max);
-                _mm256_srli_epi16::<9>(_mm256_mullo_epi16(a, b))
+                let x = _mm256_min_epi16(_mm256_max_epi16(_mm256_loadu_si256(pa.add(i)), zero), max);
+                let y = _mm256_min_epi16(_mm256_max_epi16(_mm256_loadu_si256(pb.add(i)), zero), max);
+                _mm256_srli_epi16::<9>(_mm256_mullo_epi16(x, y))
             };
-            for j in 0..HALF / 32 {
+            for j in 0..H / 32 {
                 let packed = _mm256_packus_epi16(prod(2 * j), prod(2 * j + 1));
                 _mm256_storeu_si256(q.add(j), _mm256_permute4x64_epi64::<0b11_01_10_00>(packed));
             }

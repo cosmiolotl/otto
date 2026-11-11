@@ -1,7 +1,8 @@
 """Float model, quantisation-aware: its forward pass is the integer pass of net.rs with the roundings removed.
 
 Feature transformer (FT). Each block's effective weight matrix is built from "virtual" factors that share
-statistics across rare features (Stockfish's factorisers), and folded into one `N_FEATURES × L1` matrix.
+statistics across rare features (Stockfish's factorisers), and folded into one `N_FEATURES × L1` matrix
+(`L1`, the accumulator width, is a constructor argument: 256 by default).
 The factoriser of each block ([`FACTORISERS`]):
 
   pattern  row / covered (y, p):  W[y,p] + P[p] + Σ_{x∈p} C[y,x] + F[y, popcount p]
@@ -23,7 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .data import Batch
-from .layout import DENSE_W_MAX, FT_B_MAX, FT_W_MAX, HALF, L1, L2, L2_IN, L3, L3_IN, N_BUCKETS, Layout
+from .layout import DENSE_W_MAX, FT_B_MAX, FT_W_MAX, L1, L2, L3, L3_IN, N_BUCKETS, Layout, supported_l1
 
 FACTORISERS = {
     "row": "pattern",
@@ -51,18 +52,21 @@ def _bits(width: int) -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class FeatureTransformer(nn.Module):
-    def __init__(self, layout: Layout):
+    def __init__(self, layout: Layout, l1: int = L1):
         super().__init__()
+        if not supported_l1(l1):
+            raise ValueError(f"unsupported accumulator width {l1}")
+        self.l1 = l1
         unknown = set(layout.blocks) ^ set(FACTORISERS)
         if unknown:
             raise ValueError(f"blocks without a factoriser, or factorisers without a block: {sorted(unknown)}")
         self.layout = layout
 
         def z(*shape):
-            return nn.Parameter(torch.zeros(*shape, L1))
+            return nn.Parameter(torch.zeros(*shape, l1))
 
         def r(*shape):
-            return nn.Parameter(torch.randn(*shape, L1) * 0.02)
+            return nn.Parameter(torch.randn(*shape, l1) * 0.02)
 
         p = {}
         for name, block in layout.blocks.items():
@@ -91,7 +95,7 @@ class FeatureTransformer(nn.Module):
             else:
                 p[name] = r(*dims)
         self.p = nn.ParameterDict(p)
-        self.bias = nn.Parameter(torch.full((L1,), 0.5))
+        self.bias = nn.Parameter(torch.full((l1,), 0.5))
 
     def _block(self, name: str) -> torch.Tensor:
         p = self.p
@@ -111,7 +115,7 @@ class FeatureTransformer(nn.Module):
 
     def folded(self) -> torch.Tensor:
         """The effective `N_FEATURES × L1` matrix (unclamped), blocks in layout order."""
-        w = torch.cat([self._block(name).reshape(-1, L1) for name in self.layout.blocks], 0)
+        w = torch.cat([self._block(name).reshape(-1, self.l1) for name in self.layout.blocks], 0)
         assert w.shape[0] == self.layout.n_features, (w.shape, self.layout.n_features)
         return w
 
@@ -120,15 +124,17 @@ class FeatureTransformer(nn.Module):
 
     def side(self, w: torch.Tensor, idx: torch.Tensor, off: torch.Tensor) -> torch.Tensor:
         acc = F.embedding_bag(idx, w, off, mode="sum") + self.bias.clamp(-FT_B_MAX, FT_B_MAX)
-        a, b = acc[:, :HALF].clamp(0, 1), acc[:, HALF:].clamp(0, 1)
+        half = self.l1 // 2
+        a, b = acc[:, :half].clamp(0, 1), acc[:, half:].clamp(0, 1)
         return a * b
 
 
 class ValueNet(nn.Module):
-    def __init__(self, layout: Layout):
+    def __init__(self, layout: Layout, l1: int = L1):
         super().__init__()
-        self.ft = FeatureTransformer(layout)
-        self.l2 = nn.Linear(L2_IN, L2 * N_BUCKETS)
+        self.l1 = l1
+        self.ft = FeatureTransformer(layout, l1)
+        self.l2 = nn.Linear(l1, L2 * N_BUCKETS)
         self.l3 = nn.Linear(L3_IN, L3 * N_BUCKETS)
         self.out = nn.Linear(L3, N_BUCKETS)
         with torch.no_grad():

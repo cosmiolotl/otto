@@ -29,6 +29,7 @@ pub fn datagen(args: &Args) -> CmdResult {
         batch: args.num("--batch", 64)?,
         siblings: args.num("--siblings", 0)?,
         teacher: args.get("--teacher").map(weights::load).transpose()?,
+        keep_clears: args.has("--keep-clears"),
     };
     let t = run(&cfg).map_err(|e| format!("{out}: {e}"))?;
     println!(

@@ -3,5 +3,4 @@
 Otto is an engine trained to play competitive modern Tetris. 
 
 You can play against it here: 
-
-xxx
+[https://cosmiolotl.github.io/otto/](https://cosmiolotl.github.io/otto/)

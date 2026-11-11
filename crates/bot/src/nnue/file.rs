@@ -4,15 +4,18 @@
 //! "OTTONNUE", u32 version, u32 layout hash, u32 n_features, l1, l2, l3, n_buckets,
 //! u32 desc length, desc (UTF-8),
 //! ft_b i16[L1], ft_w i16[N_FEATURES · L1] (feature-major),
-//! per bucket: l2_w i8[L2 · L2_IN] (output-major), l2_b i32[L2], l3_w i8[L3 · L3_IN], l3_b i32[L3],
+//! per bucket: l2_w i8[L2 · L1] (output-major), l2_b i32[L2], l3_w i8[L3 · L3_IN], l3_b i32[L3],
 //!             out_w i8[L3], out_b i32.
 //! ```
+//!
+//! `l1` is the network's accumulator width (any [`supported_l1`] value); every other field of the header
+//! must match this build.
 
 use std::io::{self, Read, Write};
 use std::path::Path;
 
 use super::features::{self, N_BUCKETS, N_FEATURES};
-use super::net::{L1, L2, L3, Network};
+use super::net::{L2, L3, Network, supported_l1};
 
 const MAGIC: &[u8; 8] = b"OTTONNUE";
 pub const FORMAT_VERSION: u32 = 1;
@@ -26,9 +29,9 @@ pub fn layout_hash() -> u32 {
     h
 }
 
-/// The header fields after the magic, before the description length.
-fn header() -> [u32; 7] {
-    [FORMAT_VERSION, layout_hash(), N_FEATURES as u32, L1 as u32, L2 as u32, L3 as u32, N_BUCKETS as u32]
+/// The header fields after the magic, before the description length, for width `l1`.
+fn header(l1: usize) -> [u32; 7] {
+    [FORMAT_VERSION, layout_hash(), N_FEATURES as u32, l1 as u32, L2 as u32, L3 as u32, N_BUCKETS as u32]
 }
 
 impl Network {
@@ -50,21 +53,24 @@ impl Network {
         for v in got.iter_mut() {
             *v = read_u32(r)?;
         }
-        if got != header() {
+        let l1 = got[3] as usize;
+        if !supported_l1(l1) || got != header(l1) {
             return Err(bad(format!(
-                "architecture mismatch: file has version/layout/features/l1/l2/l3/buckets {got:?}, this build expects {:?}",
-                header()
+                "architecture mismatch: file has version/layout/features/l1/l2/l3/buckets {got:?}, this build expects {:?} \
+                 (l1 one of {:?})",
+                header(l1),
+                super::net::SUPPORTED_L1
             )));
         }
         let mut desc = vec![0u8; read_u32(r)? as usize];
         r.read_exact(&mut desc)?;
-        let mut n = Network::zeroed();
+        let mut n = Network::zeroed_l1(l1);
         n.desc = String::from_utf8_lossy(&desc).into_owned();
-        read_i16s(r, &mut n.ft_b.0)?;
+        read_i16s(r, &mut n.ft_b.0[..l1])?;
         read_i16s(r, &mut n.ft_w)?;
         for s in n.stacks.iter_mut() {
             for row in s.l2_w.iter_mut() {
-                read_i8s(r, row)?;
+                read_i8s(r, &mut row[..l1])?;
             }
             read_i32s(r, &mut s.l2_b)?;
             for row in s.l3_w.iter_mut() {
@@ -84,15 +90,15 @@ impl Network {
     pub fn write(&self, w: &mut impl Write) -> io::Result<()> {
         w.write_all(MAGIC)?;
         let desc = self.desc.as_bytes();
-        for v in header().into_iter().chain([desc.len() as u32]) {
+        for v in header(self.l1).into_iter().chain([desc.len() as u32]) {
             w.write_all(&v.to_le_bytes())?;
         }
         w.write_all(desc)?;
         let mut buf = Vec::with_capacity(self.ft_w.len() * 2 + 4096);
-        buf.extend(self.ft_b.0.iter().flat_map(|v| v.to_le_bytes()));
+        buf.extend(self.ft_b.0[..self.l1].iter().flat_map(|v| v.to_le_bytes()));
         buf.extend(self.ft_w.iter().flat_map(|v| v.to_le_bytes()));
         for s in &self.stacks {
-            buf.extend(s.l2_w.iter().flatten().map(|&v| v as u8));
+            buf.extend(s.l2_w.iter().flat_map(|row| &row[..self.l1]).map(|&v| v as u8));
             buf.extend(s.l2_b.iter().flat_map(|v| v.to_le_bytes()));
             buf.extend(s.l3_w.iter().flatten().map(|&v| v as u8));
             buf.extend(s.l3_b.iter().flat_map(|v| v.to_le_bytes()));
@@ -148,11 +154,17 @@ mod tests {
 
     #[test]
     fn file_round_trip() {
-        let net = Network::random(11);
+        for l1 in [256, 512] {
+            round_trip(l1);
+        }
+    }
+
+    fn round_trip(l1: usize) {
+        let net = Network::random_l1(11, l1);
         let mut bytes = Vec::new();
         net.write(&mut bytes).unwrap();
         let back = Network::read(&mut bytes.as_slice()).unwrap();
-        assert_eq!(back.desc, net.desc);
+        assert_eq!((back.l1, &back.desc), (l1, &net.desc));
         assert_eq!(back.ft_b, net.ft_b);
         assert_eq!(back.ft_w, net.ft_w);
         assert_eq!(back.stacks, net.stacks);

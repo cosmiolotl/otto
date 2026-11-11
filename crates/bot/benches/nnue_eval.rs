@@ -71,6 +71,15 @@ fn bench(c: &mut Criterion) {
         })
     });
     g.bench_function("opponent_table (once per move)", |b| b.iter(|| black_box(net.opponent_table(&st[1], 24))));
+    let wide = Network::random_l1(1, 512);
+    let wide_opp = wide.opponent_table(&st[0], 24);
+    g.bench_function("evaluate, L1 512", |b| {
+        b.iter(|| {
+            let v = wide.evaluate(black_box(&st[i % st.len()]), 24, &wide_opp, 2);
+            i += 1;
+            black_box(v)
+        })
+    });
     g.finish();
 }
 

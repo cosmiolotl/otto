@@ -119,6 +119,7 @@ def main(argv=None):
     ap.add_argument("--lam", type=float, default=0.5, help="teacher weight in the target (0 = outcomes only)")
     ap.add_argument("--teacher", choices=TEACHERS, default="static")
     ap.add_argument("--swap", type=float, default=0.0, help="probability of exchanging the perspectives")
+    ap.add_argument("--l1", type=int, default=256, help="accumulator width (a multiple of 128, at most 512)")
     ap.add_argument("--rank-weight", type=float, default=1.0, help="weight of the sibling ranking loss")
     ap.add_argument("--rank-temp", type=float, default=1.0, help="softmax temperature of the ranking loss")
     ap.add_argument("--max-steps", type=int, default=0, help="stop after this many steps (smoke tests)")
@@ -150,7 +151,7 @@ def main(argv=None):
           f"a={target.a:.4f} c={target.c:.4f}; rank scale {rank_a:.4f}, weight {args.rank_weight}, "
           f"temp {args.rank_temp}")
 
-    model = ValueNet(layout).to(dev)
+    model = ValueNet(layout, args.l1).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
     gamma = (args.lr_end / args.lr) ** (1 / max(total_steps, 1))
     sched = torch.optim.lr_scheduler.ExponentialLR(opt, gamma)
@@ -193,7 +194,7 @@ def main(argv=None):
         print(json.dumps(stats), flush=True)
         log.write(json.dumps(stats) + "\n")
         log.flush()
-        desc = json.dumps({"epoch": epoch + 1, "data": args.data, "lam": args.lam, "teacher": args.teacher,
+        desc = json.dumps({"epoch": epoch + 1, "data": args.data, "l1": args.l1, "lam": args.lam, "teacher": args.teacher,
                            "rank_weight": args.rank_weight, "val_bce_outcome": stats["val_bce_outcome"],
                            "val_pair_acc": stats.get("val_pair_acc")})
         q = quantize(model, layout, desc)

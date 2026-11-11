@@ -8,10 +8,10 @@ from pathlib import Path
 
 FEATURE_SET = "rows-v1"
 
-# Architecture (net.rs).
+# Architecture (net.rs). L1, the accumulator width, is per network: L1 is the default (v1, v2), and any
+# multiple of 128 up to L1_MAX is supported (`supported_l1`).
 L1 = 256
-HALF = L1 // 2
-L2_IN = 2 * HALF
+L1_MAX = 512
 L2 = 16
 L3_IN = 2 * L2
 L3 = 32
@@ -25,6 +25,10 @@ FORMAT_VERSION = 1
 FT_W_MAX = 1.0
 FT_B_MAX = 8.0
 DENSE_W_MAX = 127.0 / W_Q
+
+
+def supported_l1(l1: int) -> bool:
+    return 0 < l1 <= L1_MAX and l1 % 128 == 0
 
 
 def fnv1a(data: bytes) -> int:

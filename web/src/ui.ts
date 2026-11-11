@@ -237,7 +237,7 @@ export class SettingsPanel {
   private build(): void {
     const head = el('div', 'settings-head');
     const logo = el('img');
-    logo.src = '/icon.svg';
+    logo.src = `${import.meta.env.BASE_URL}icon.svg`;
     logo.alt = '';
     const reset = el('button', 'btn btn-ghost');
     reset.type = 'button';

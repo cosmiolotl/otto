@@ -9,8 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .layout import (
-    A_Q, DENSE_W_MAX, FORMAT_VERSION, FT_B_MAX, FT_Q, FT_W_MAX, HALF, L1, L2, L2_IN, L3, L3_IN, N_BUCKETS, W_Q,
-    Layout,
+    A_Q, DENSE_W_MAX, FORMAT_VERSION, FT_B_MAX, FT_Q, FT_W_MAX, L2, L3, L3_IN, N_BUCKETS, W_Q, Layout, supported_l1,
 )
 
 MAGIC = b"OTTONNUE"
@@ -23,12 +22,16 @@ class QuantNet:
     desc: str
     ft_b: np.ndarray  # i16[L1]
     ft_w: np.ndarray  # i16[N, L1]
-    l2_w: np.ndarray  # i8[B, L2, L2_IN]
+    l2_w: np.ndarray  # i8[B, L2, L1]
     l2_b: np.ndarray  # i32[B, L2]
     l3_w: np.ndarray  # i8[B, L3, L3_IN]
     l3_b: np.ndarray  # i32[B, L3]
     out_w: np.ndarray  # i8[B, L3]
     out_b: np.ndarray  # i32[B]
+
+    @property
+    def l1(self) -> int:
+        return len(self.ft_b)
 
 
 def _q(x: np.ndarray, scale: float, dtype, lo: float, hi: float) -> np.ndarray:
@@ -42,7 +45,7 @@ def quantize(model, layout: Layout, desc: str = "") -> QuantNet:
     with torch.no_grad():
         ft_w = model.ft.folded().cpu().numpy()
         ft_b = model.ft.bias.cpu().numpy()
-        l2w = model.l2.weight.cpu().numpy().reshape(N_BUCKETS, L2, L2_IN)
+        l2w = model.l2.weight.cpu().numpy().reshape(N_BUCKETS, L2, model.l1)
         l2b = model.l2.bias.cpu().numpy().reshape(N_BUCKETS, L2)
         l3w = model.l3.weight.cpu().numpy().reshape(N_BUCKETS, L3, L3_IN)
         l3b = model.l3.bias.cpu().numpy().reshape(N_BUCKETS, L3)
@@ -63,7 +66,7 @@ def write_nnue(q: QuantNet, path: str | Path) -> None:
     desc = q.desc.encode()
     with open(path, "wb") as f:
         f.write(MAGIC)
-        f.write(struct.pack("<8I", FORMAT_VERSION, q.layout_hash, q.n_features, L1, L2, L3, N_BUCKETS, len(desc)))
+        f.write(struct.pack("<8I", FORMAT_VERSION, q.layout_hash, q.n_features, q.l1, L2, L3, N_BUCKETS, len(desc)))
         f.write(desc)
         f.write(q.ft_b.astype("<i2").tobytes())
         f.write(q.ft_w.astype("<i2").tobytes())
@@ -80,7 +83,7 @@ def read_nnue(path: str | Path) -> QuantNet:
     data = Path(path).read_bytes()
     assert data[:8] == MAGIC, "not an otto network file"
     version, h, nf, l1, l2, l3, nb, dl = struct.unpack_from("<8I", data, 8)
-    assert (version, l1, l2, l3, nb) == (FORMAT_VERSION, L1, L2, L3, N_BUCKETS), "architecture mismatch"
+    assert (version, l2, l3, nb) == (FORMAT_VERSION, L2, L3, N_BUCKETS) and supported_l1(l1), "architecture mismatch"
     pos = 40
     desc = data[pos : pos + dl].decode(errors="replace")
     pos += dl
@@ -91,11 +94,11 @@ def read_nnue(path: str | Path) -> QuantNet:
         pos += a.nbytes
         return a
 
-    ft_b = take("<i2", L1)
-    ft_w = take("<i2", nf * L1).reshape(nf, L1)
+    ft_b = take("<i2", l1)
+    ft_w = take("<i2", nf * l1).reshape(nf, l1)
     l2_w, l2_b, l3_w, l3_b, out_w, out_b = [], [], [], [], [], []
     for _ in range(nb):
-        l2_w.append(take("i1", L2 * L2_IN).reshape(L2, L2_IN))
+        l2_w.append(take("i1", L2 * l1).reshape(L2, l1))
         l2_b.append(take("<i4", L2))
         l3_w.append(take("i1", L3 * L3_IN).reshape(L3, L3_IN))
         l3_b.append(take("<i4", L3))
@@ -113,10 +116,12 @@ def _wrap16(x: np.ndarray) -> np.ndarray:
 def reference_eval(q: QuantNet, me: np.ndarray, opp: np.ndarray, bucket: int) -> int:
     """Exact integer forward pass (same roundings and wrapping as net.rs). Returns the raw output."""
 
+    half = q.l1 // 2
+
     def side(feats):
         acc = _wrap16(q.ft_b.astype(np.int64) + q.ft_w[np.asarray(feats, dtype=np.int64)].astype(np.int64).sum(0))
-        a = np.clip(acc[:HALF], 0, FT_Q)
-        b = np.clip(acc[HALF:], 0, FT_Q)
+        a = np.clip(acc[:half], 0, FT_Q)
+        b = np.clip(acc[half:], 0, FT_Q)
         return (a * b) >> 9
 
     x = np.concatenate([side(me), side(opp)])

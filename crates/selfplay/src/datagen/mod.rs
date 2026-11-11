@@ -11,7 +11,9 @@
 //! search would value them (`eval(child, path of one lock)`) and featurised as the search's [`NnueEval`]
 //! sees them (hypothetical root, opponent with the lines this lock sent). The trainer ranks siblings of
 //! one decision against each other. They are the teacher's top quarter, the placement the bot chose, and
-//! random others.
+//! random others; with `keep_clears`, every placement that clears lines (every attack, every T-spin clear)
+//! comes first, up to half of K, since such placements are a few percent of all children and a random draw
+//! rarely includes them.
 //!
 //! [`NnueEval`]: tetris_bot::NnueEval
 
@@ -49,6 +51,8 @@ pub struct DatagenConfig {
     pub siblings: usize,
     /// Teacher for every static score (decisions and siblings); `None`: each seat's own weights.
     pub teacher: Option<Weights>,
+    /// Siblings: always include the line-clearing children (up to `siblings / 2`).
+    pub keep_clears: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -69,13 +73,18 @@ fn teacher(cfg: &DatagenConfig, spec: &BotSpec) -> HandEval {
     HandEval::new(cfg.teacher.clone().or_else(|| spec.weights().cloned()).unwrap_or_default())
 }
 
-/// One-ply children of `root` with their teacher scores: (score, placement, child, lines sent).
-fn children(
-    root: &PlayerState,
-    teacher: &HandEval,
-    buf: &mut Vec<Placement>,
-    out: &mut Vec<(f32, Placement, PlayerState, u32)>,
-) {
+/// A one-ply child of a decision.
+struct Child {
+    score: f32,
+    placement: Placement,
+    state: PlayerState,
+    /// Lines sent by the lock (the opponent's pending grows by this much).
+    sent: u32,
+    clears: bool,
+}
+
+/// One-ply children of `root` with their teacher scores.
+fn children(root: &PlayerState, teacher: &HandEval, buf: &mut Vec<Placement>, out: &mut Vec<Child>) {
     buf.clear();
     out.clear();
     movegen::generate(root, GenOptions::new(GEN_MODE, true), buf);
@@ -88,27 +97,37 @@ fn children(
         }
         let mut acc = PathAcc::default();
         acc.push(&lock, b2b, teacher.discount());
-        out.push((teacher.eval(&c, &acc), pl, c, acc.sent_lines));
+        out.push(Child {
+            score: teacher.eval(&c, &acc),
+            placement: pl,
+            state: c,
+            sent: acc.sent_lines,
+            clears: lock.lines > 0,
+        });
     }
 }
 
-/// Which children become siblings: all if there are at most `k`, else the teacher's top `k / 4` (at least
-/// one), the chosen placement, and uniformly random others. Returns indices into `kids`.
-fn pick_siblings(
-    kids: &[(f32, Placement, PlayerState, u32)],
-    chosen: Placement,
-    k: usize,
-    rng: &mut SplitMix,
-) -> Vec<usize> {
+/// Which children become siblings: all if there are at most `k`. Else, with `keep_clears`, the
+/// line-clearing children first (the teacher's best of them if there are more than `k / 2`); then the
+/// teacher's top `k / 4` (at least one) of the rest, the chosen placement, and uniformly random others.
+/// Returns indices into `kids`.
+fn pick_siblings(kids: &[Child], chosen: Placement, k: usize, keep_clears: bool, rng: &mut SplitMix) -> Vec<usize> {
     let mut order: Vec<usize> = (0..kids.len()).collect();
     if kids.len() <= k {
         return order;
     }
-    order.sort_by(|&a, &b| kids[b].0.total_cmp(&kids[a].0));
-    let top = (k / 4).max(1);
-    let mut pick: Vec<usize> = order[..top].to_vec();
+    order.sort_by(|&a, &b| kids[b].score.total_cmp(&kids[a].score));
+    let mut pick: Vec<usize> = Vec::with_capacity(k);
+    if keep_clears {
+        pick.extend(order.iter().copied().filter(|&i| kids[i].clears).take(k / 2));
+        order.retain(|i| !pick.contains(i));
+    }
+    let top = (k / 4).max(1).min(k - pick.len());
+    pick.extend_from_slice(&order[..top]);
     let mut rest: Vec<usize> = order[top..].to_vec();
-    if let Some(i) = rest.iter().position(|&i| kids[i].1 == chosen) {
+    if pick.len() < k
+        && let Some(i) = rest.iter().position(|&i| kids[i].placement == chosen)
+    {
         pick.push(rest.swap_remove(i));
     }
     while pick.len() < k {
@@ -164,8 +183,9 @@ pub fn play_and_sample(cfg: &DatagenConfig, game: usize) -> (Vec<Sample>, Option
         extract_static(&opp_h, obs.opp_fpp, &mut opp_static);
         let opp_base = opp_h.garbage.size();
         children(&root, t, &mut buf, &mut kids);
-        for (n, i) in pick_siblings(&kids, d.placement, cfg.siblings, &mut rng).into_iter().enumerate() {
-            let (score, pl, child, sent) = &kids[i];
+        for (n, i) in pick_siblings(&kids, d.placement, cfg.siblings, cfg.keep_clears, &mut rng).into_iter().enumerate()
+        {
+            let Child { score, placement: pl, state: child, sent, .. } = &kids[i];
             let mut sib = Sample { bucket_me: bucket(child) as u8, search_score: *score, static_score: *score, ..s };
             sib.sib = (n as u16 + 1) | if *pl == d.placement { CHOSEN } else { 0 };
             extract(child, obs.my_fpp, &mut sib.me);
@@ -199,6 +219,7 @@ pub fn run(cfg: &DatagenConfig) -> std::io::Result<DatagenTotals> {
         "every": cfg.every,
         "siblings": cfg.siblings,
         "teacher": cfg.teacher.is_some(),
+        "keep_clears": cfg.keep_clears,
         "conditions": serde_json::to_value(&cfg.cond).unwrap(),
         "bots": cfg.bots.iter().map(|b| serde_json::json!({ "name": b.name, "width": b.opts.width })).collect::<Vec<_>>(),
     });
@@ -258,6 +279,7 @@ mod tests {
             batch: 2,
             siblings: 0,
             teacher: None,
+            keep_clears: false,
         };
         let (a, wa, pa) = play_and_sample(&cfg, 1);
         let (b, wb, pb) = play_and_sample(&cfg, 1);
@@ -285,6 +307,7 @@ mod tests {
             batch: 1,
             siblings: 8,
             teacher: Some(w),
+            keep_clears: true,
         };
         let (a, _, _) = play_and_sample(&cfg, 0);
         let (b, _, _) = play_and_sample(&cfg, 0);
