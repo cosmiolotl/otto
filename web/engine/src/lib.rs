@@ -8,8 +8,14 @@
 //! state change as an event log ([`Game::take_log`]). A Web Worker replays that log into its own copy
 //! ([`Game::apply_log`]) and runs the bot on it ([`Brain::think`]). Both copies run the same deterministic
 //! code, so they stay identical; the bot only ever sees an [`Observation`] of the copy.
+//!
+//! Otto has two brains: the hand-written evaluation ([`Brain::new`], built in) and the NNUE value network
+//! ([`Brain::with_net`], from a [`Net`] the page downloads; it is about 25 MB, so it is not embedded).
 
-use tetris_bot::{Bot, HandEval, Observation, SearchOptions};
+use std::sync::Arc;
+
+use tetris_bot::nnue::Network;
+use tetris_bot::{AnyEval, Bot, HandEval, NnueEval, Observation, SearchOptions, Weights};
 use tetris_sim::board::{BOARD_HEIGHT, BOARD_WIDTH};
 use tetris_sim::versus::route;
 use tetris_sim::{Key, LockObserver, LockOutcome, Piece, Placement, PlayerState, Rotation, Spin};
@@ -382,19 +388,57 @@ impl Game {
 /// `runs/aws/runs/m5/mean.json`).
 const WEIGHTS: &str = include_str!("../../../weights.json");
 
-/// Otto's search: the "d10" configuration, 6 beam plies (current + preview) plus 4 greedy plies on a
-/// sampled bag-consistent continuation (`bot-vs-bot --extra 4`, K = 1).
+/// The hand-written bot's search: the "d10" configuration, 6 beam plies (current + preview) plus 4 greedy
+/// plies on a sampled bag-consistent continuation (`bot-vs-bot --extra 4`, K = 1).
 pub const EXTRA_PLIES: usize = 4;
 pub const CONTINUATIONS: usize = 1;
+
+fn weights() -> Weights {
+    serde_json::from_str(WEIGHTS).expect("weights.json")
+}
+
+/// A value network (a `.nnue` file), parsed once and shared by every [`Brain`] made from it.
+#[wasm_bindgen]
+pub struct Net {
+    net: Arc<Network>,
+    name: String,
+}
+
+#[wasm_bindgen]
+impl Net {
+    /// Parse a `.nnue` file. `name` labels the bot (e.g. `v5s1`).
+    #[wasm_bindgen(constructor)]
+    pub fn new(bytes: &[u8], name: String) -> Result<Net, JsError> {
+        Net::parse(bytes, name).map_err(|e| JsError::new(&e))
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    /// The trainer's description from the file.
+    pub fn desc(&self) -> String {
+        self.net.desc.clone()
+    }
+}
+
+impl Net {
+    fn parse(bytes: &[u8], name: String) -> Result<Net, String> {
+        let net = Network::read(&mut &bytes[..]).map_err(|e| format!("{name}: {e}"))?;
+        Ok(Net { net: Arc::new(net), name })
+    }
+}
 
 /// Otto: the bot, run on a replica [`Game`] (in the worker).
 #[wasm_bindgen]
 pub struct Brain {
-    bot: Bot<HandEval>,
+    bot: Bot<AnyEval>,
+    name: String,
 }
 
 #[wasm_bindgen]
 impl Brain {
+    /// The hand-written evaluation with the embedded `mean-0511` weights, searched at d10.
     #[wasm_bindgen(constructor)]
     pub fn new(width: u32, seed: u32) -> Brain {
         let opts = SearchOptions {
@@ -403,13 +447,24 @@ impl Brain {
             continuations: CONTINUATIONS,
             ..SearchOptions::default()
         };
-        let w: tetris_bot::Weights = serde_json::from_str(WEIGHTS).expect("weights.json");
-        Brain { bot: Bot::new(w, opts, seed as u64) }
+        let w = weights();
+        let name = w.name.clone();
+        Brain { bot: Bot::with_eval(AnyEval::Hand(Box::new(HandEval::new(w))), opts, seed as u64), name }
     }
 
-    /// Name of the weights in use.
-    pub fn weights_name(&self) -> String {
-        self.bot.eval.weights.name.clone()
+    /// The value network, searched at depth 6 with no extra plies (the setting its gates were played at,
+    /// `docs/NNUE.md`). A `rows-v1-plan` network reads the release controller's plan, which uses the
+    /// embedded weights' thresholds; a `rows-v1` network plays without a controller (always BUILD).
+    pub fn with_net(net: &Net, width: u32, seed: u32) -> Brain {
+        let opts = SearchOptions { width: width.max(1) as usize, ..SearchOptions::default() };
+        let controller = net.net.layout.has_plan().then(weights);
+        let eval = NnueEval::with_controller(net.net.clone(), controller);
+        Brain { bot: Bot::with_eval(AnyEval::Nnue(Box::new(eval)), opts, seed as u64), name: net.name.clone() }
+    }
+
+    /// Name of the bot: the weights (`mean-0511`) or the network (`v5s1`).
+    pub fn name(&self) -> String {
+        self.name.clone()
     }
 
     pub fn set_width(&mut self, width: u32) {
@@ -511,7 +566,7 @@ mod weight_tests {
     #[test]
     fn embedded_weights_are_mean_0511() {
         let b = Brain::new(96, 1);
-        assert_eq!(b.weights_name(), "mean-0511");
+        assert_eq!(b.name(), "mean-0511");
         assert_eq!(b.bot.opts.depth + b.bot.opts.extra_plies, 10);
     }
 
@@ -521,6 +576,42 @@ mod weight_tests {
     fn think_time() {
         let mut g = Game::new(0x5eed, 12, false);
         let mut b = Brain::new(96, 1);
+        let t0 = std::time::Instant::now();
+        let mut n = 0;
+        while n < 60 && g.winner() < 0 {
+            g.advance_to(g.otto_due());
+            let r = b.think(&g, 30);
+            assert!(!r.is_empty() && g.play_otto(r[0] as u32));
+            n += 1;
+        }
+        println!("{n} moves, {:.2} ms/move", t0.elapsed().as_secs_f64() * 1000.0 / n as f64);
+    }
+
+    /// A network brain from file bytes plays legal moves on the authoritative copy.
+    #[test]
+    fn nnue_brain_plays() {
+        let mut bytes = Vec::new();
+        Network::random(3).write(&mut bytes).unwrap();
+        let net = Net::parse(&bytes, "random".into()).unwrap();
+        assert!(Net::parse(&bytes[..bytes.len() - 1], "cut".into()).is_err());
+        let mut b = Brain::with_net(&net, 16, 1);
+        assert_eq!(b.name(), "random");
+        let mut g = Game::new(0x5eed, 12, false);
+        for _ in 0..30 {
+            g.advance_to(g.otto_due());
+            let r = b.think(&g, 30);
+            assert!(!r.is_empty() && g.play_otto(r[0] as u32));
+        }
+    }
+
+    /// Native think time per move of a real network (`OTTO_NET=path/to/net.nnue cargo test --release -p
+    /// otto-wasm -- --nocapture nnue_think_time`); skipped without `OTTO_NET`.
+    #[test]
+    fn nnue_think_time() {
+        let Ok(path) = std::env::var("OTTO_NET") else { return };
+        let net = Net::parse(&std::fs::read(&path).unwrap(), "net".into()).unwrap();
+        let mut g = Game::new(0x5eed, 12, false);
+        let mut b = Brain::with_net(&net, 96, 1);
         let t0 = std::time::Instant::now();
         let mut n = 0;
         while n < 60 && g.winner() < 0 {

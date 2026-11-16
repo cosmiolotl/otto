@@ -1,4 +1,4 @@
-// Player settings: Otto's speed, handling and key bindings. Kept in localStorage (a per-browser
+// Player settings: Otto's engine and speed, handling and key bindings. Kept in localStorage (a per-browser
 // convenience; everything still works when storage is unavailable).
 
 export type Action =
@@ -35,7 +35,14 @@ export interface Handling {
   dcd: number;
 }
 
+/** Otto's evaluation: the hand-written one (built in) or the NNUE value network (downloaded on demand). */
+export type Engine = 'hand' | 'nnue';
+
+/** The network the neural engine plays (packed by `npm run net`, served from public/nets/). */
+export const NET = { name: 'v5s1', file: 'nets/v5s1.nnue.gzip', mb: 14.1 } as const;
+
 export interface Settings {
+  engine: Engine;
   /** Otto's pieces per second. */
   pps: number;
   handling: Handling;
@@ -48,6 +55,7 @@ export const PPS_MAX = 10;
 export const SDF_INFINITE = 41;
 
 export const DEFAULTS: Settings = {
+  engine: 'hand',
   pps: 2.5,
   handling: { das: 117, arr: 0, sdf: SDF_INFINITE, dcd: 17 },
   keys: {
@@ -75,6 +83,7 @@ function load(): Settings {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return s;
     const saved = JSON.parse(raw) as Partial<Settings>;
+    if (saved.engine === 'hand' || saved.engine === 'nnue') s.engine = saved.engine;
     if (typeof saved.pps === 'number') s.pps = clampPps(saved.pps);
     if (saved.handling) Object.assign(s.handling, saved.handling);
     if (saved.keys) {

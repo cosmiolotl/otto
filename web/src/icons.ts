@@ -5,9 +5,11 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  BrainCircuit,
   CornerDownLeft,
   Cpu,
   Delete,
+  Download,
   Flag,
   type IconNode,
   RefreshCw,
@@ -27,7 +29,7 @@ export function icon(node: IconNode, size = 16, strokeWidth = 1.75): SVGElement 
   });
 }
 
-export const Icons = { Cpu, Flag, RefreshCw, RotateCcw, TriangleAlert, Trophy };
+export const Icons = { BrainCircuit, Cpu, Download, Flag, RefreshCw, RotateCcw, TriangleAlert, Trophy };
 
 /** Keys drawn as an icon instead of text. */
 const KEY_ICONS: Record<string, IconNode> = {

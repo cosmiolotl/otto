@@ -1,5 +1,5 @@
 // Loads the WebAssembly engine (built by `npm run wasm` into src/wasm/). Used by the page and the worker.
-import init, { Brain, Game } from './wasm/otto_wasm.js';
+import init, { Brain, Game, Net } from './wasm/otto_wasm.js';
 import wasmUrl from './wasm/otto_wasm_bg.wasm?url';
 
 let ready: Promise<unknown> | null = null;
@@ -9,7 +9,7 @@ export function loadEngine(): Promise<unknown> {
   return ready;
 }
 
-export { Brain, Game, wasmUrl };
+export { Brain, Game, Net, wasmUrl };
 
 /** `Key::ALL` indices of the sim (crates/sim/src/state.rs). */
 export const Key = {

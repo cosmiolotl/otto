@@ -5,7 +5,7 @@ import { FPS, Game, loadEngine } from './engine';
 import { Icons, icon } from './icons';
 import { HumanController } from './input';
 import type { FromWorker, ToWorker } from './protocol';
-import { settings } from './settings';
+import { NET, settings } from './settings';
 import { PlayerView, SettingsPanel, fitCell } from './ui';
 
 type Phase = 'loading' | 'idle' | 'countdown' | 'playing' | 'over';
@@ -37,9 +37,12 @@ const wins = [0, 0];
 let moveId = 0;
 let requested = false;
 let decision: { id: number; packed: number } | null = null;
-/** Worker think time per move: benchmark p90, then a running average from play. */
+/** Worker think time per move of the engine Otto plays: benchmark p90, then a running average from play. */
 let benchMs: number | null = null;
 let thinkEma: number | null = null;
+/** The bot Otto plays with now (`mean-0511`, `v5s1`), and the engine last asked of the worker. */
+let ottoName = '';
+let sentEngine: string | null = null;
 
 const ottoFpp = () => Math.max(1, Math.round(FPS / settings.value.pps));
 
@@ -52,21 +55,47 @@ function deviceLimit(): number | null {
 
 function updateDevice(): void {
   panel.setDevice(deviceLimit(), thinkEma ?? benchMs);
-  otto.setMeta(`${settings.value.pps.toFixed(1)} pps`);
+  const pps = `${settings.value.pps.toFixed(1)} pps`;
+  otto.setMeta(ottoName ? `${ottoName} · ${pps}` : pps);
+}
+
+/** Tell the worker which engine to play (when the setting changed). */
+function sendEngine(): void {
+  const engine = settings.value.engine;
+  if (engine === sentEngine) return;
+  sentEngine = engine;
+  if (engine === 'nnue') panel.setEngineStatus({ state: 'loading', loaded: 0, total: 0 });
+  const netUrl = new URL(NET.file, document.baseURI).href;
+  send({ t: 'engine', engine, netUrl, netName: NET.name });
 }
 
 settings.subscribe(() => {
   game?.set_otto_fpp(ottoFpp());
+  sendEngine();
   updateDevice();
 });
 
 worker.onmessage = (e: MessageEvent<FromWorker>) => {
   const m = e.data;
-  if (m.t === 'ready') {
+  if (m.t === 'engine') {
+    // The first engine (always ready at once: the hand-written one plays while a network downloads).
+    if (phase === 'loading') {
+      phase = 'idle';
+      showIdle();
+    }
+    ottoName = m.name;
     benchMs = m.thinkMs;
+    thinkEma = null;
+    if (m.engine === settings.value.engine) panel.setEngineStatus({ state: 'ready', engine: m.engine, name: m.name });
     updateDevice();
-    phase = 'idle';
-    showIdle();
+  } else if (m.t === 'progress') {
+    if (settings.value.engine === 'nnue') panel.setEngineStatus({ state: 'loading', loaded: m.loaded, total: m.total });
+  } else if (m.t === 'engineError') {
+    console.warn('otto: network failed to load:', m.message);
+    panel.setEngineStatus({ state: 'error', message: m.message });
+    // Back to the engine that plays; picking the network again retries the download.
+    sentEngine = 'hand';
+    settings.update((s) => (s.engine = 'hand'));
   } else if (m.t === 'decision') {
     if (m.round !== round || m.id !== moveId) return;
     thinkEma = thinkEma === null ? m.ms : thinkEma * 0.9 + m.ms * 0.1;
@@ -283,6 +312,7 @@ function loop(now: number): void {
 }
 
 panel.setDevice(null, null);
+sendEngine();
 you.setOverlay({ big: 'Loading Otto…' });
 otto.setMeta(`${settings.value.pps.toFixed(1)} pps`);
 loadEngine().then(() => {

@@ -6,6 +6,7 @@
   "description": "Play against Otto in the browser: the engine compiled to WebAssembly, running in a Web Worker.",
   "scripts": {
     "wasm": "node scripts/build-wasm.mjs",
+    "net": "node scripts/pack-net.mjs",
     "dev": "vite",
     "build": "node scripts/build-wasm.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",

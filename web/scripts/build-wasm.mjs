@@ -27,7 +27,10 @@ if (have !== want) {
   process.exit(1);
 }
 
-run('cargo', ['build', '-p', 'otto-wasm', '--target', 'wasm32-unknown-unknown', '--profile', 'wasm']);
+// 128-bit SIMD (every current browser; Safari since 16.4): the network's integer kernels autovectorise,
+// about 2.6× faster per move. The hand-written bot runs at the same speed either way.
+const env = { ...process.env, CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: '-C target-feature=+simd128' };
+run('cargo', ['build', '-p', 'otto-wasm', '--target', 'wasm32-unknown-unknown', '--profile', 'wasm'], { env });
 const wasm = join(root, 'target', 'wasm32-unknown-unknown', 'wasm', 'otto_wasm.wasm');
 run('wasm-bindgen', [wasm, '--out-dir', join(web, 'src', 'wasm'), '--target', 'web', '--omit-default-module-path']);
 

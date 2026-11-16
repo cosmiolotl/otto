@@ -2,7 +2,7 @@
 import { FPS, Info, Lock } from './engine';
 import { Icons, icon, keycap } from './icons';
 import { VIEW_ROWS, drawBoard, drawMeter, drawPiece } from './render';
-import { ACTIONS, type Action, PPS_MAX, PPS_MIN, SDF_INFINITE, settings } from './settings';
+import { ACTIONS, type Action, type Engine, NET, PPS_MAX, PPS_MIN, SDF_INFINITE, settings } from './settings';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -184,8 +184,26 @@ function setFill(input: HTMLInputElement): void {
   input.style.setProperty('--fill', `${((Number(input.value) - min) / (max - min)) * 100}%`);
 }
 
-/** The settings panel: Otto's speed, handling, key bindings. */
+/** Where the engine the player picked stands (shown under the engine switch). */
+export type EngineStatus =
+  | { state: 'loading'; loaded: number; total: number }
+  | { state: 'ready'; engine: Engine; name: string }
+  | { state: 'error'; message: string };
+
+const ENGINES: { id: Engine; title: string; sub: string }[] = [
+  { id: 'hand', title: 'Hand-tuned', sub: 'mean-0511' },
+  { id: 'nnue', title: 'Neural', sub: `${NET.name} · ${NET.mb.toFixed(0)} MB` },
+];
+
+const mb = (bytes: number) => (bytes / 1e6).toFixed(1);
+
+/** The settings panel: Otto's engine and speed, handling, key bindings. */
 export class SettingsPanel {
+  private engineButtons = new Map<Engine, HTMLButtonElement>();
+  private engineNote = el('div', 'device');
+  private engineProgress = el('div', 'progress');
+  private engineError = el('div', 'warning');
+  private engineStatus: EngineStatus = { state: 'ready', engine: 'hand', name: 'mean-0511' };
   private ppsValue = el('span', 'pps-value');
   private ppsInput = el('input');
   private deviceText = el('span');
@@ -240,6 +258,26 @@ export class SettingsPanel {
     reset.title = 'Reset all settings to their defaults';
     reset.onclick = () => settings.reset();
     head.append(logo, el('span', 'title', 'Settings'), reset);
+
+    // Engine.
+    const engine = el('div', 'section');
+    const seg = el('div', 'segmented');
+    seg.setAttribute('role', 'group');
+    seg.setAttribute('aria-label', "Otto's engine");
+    for (const e of ENGINES) {
+      const b = el('button');
+      b.type = 'button';
+      b.append(el('span', 'seg-title', e.title), el('span', 'seg-sub', e.sub));
+      b.onclick = () => {
+        settings.update((s) => (s.engine = e.id));
+        b.blur();
+      };
+      seg.append(b);
+      this.engineButtons.set(e.id, b);
+    }
+    this.engineProgress.append(el('span'));
+    this.engineError.hidden = true;
+    engine.append(label('Engine'), seg, this.engineNote, this.engineProgress, this.engineError);
 
     // Speed.
     const speed = el('div', 'section');
@@ -299,11 +337,43 @@ export class SettingsPanel {
       this.controlRows.set(a.id, btn);
     }
 
-    this.root.append(head, speed, handling, controls);
+    this.root.append(head, engine, speed, handling, controls);
+  }
+
+  setEngineStatus(status: EngineStatus): void {
+    this.engineStatus = status;
+    this.syncEngine();
+  }
+
+  private syncEngine(): void {
+    const picked = settings.value.engine;
+    for (const [id, b] of this.engineButtons) b.setAttribute('aria-pressed', String(id === picked));
+    const st = this.engineStatus;
+    this.engineProgress.hidden = st.state !== 'loading';
+    this.engineError.hidden = st.state !== 'error';
+    if (st.state === 'loading') {
+      // Without a Content-Length, measure against the packed file's known size.
+      const total = st.total > 0 ? st.total : NET.mb * 1e6;
+      const frac = Math.min(1, st.loaded / total);
+      (this.engineProgress.firstChild as HTMLElement).style.width = `${frac * 100}%`;
+      const amount = st.loaded > 0 ? `${mb(Math.min(st.loaded, total))} / ${mb(total)} MB` : '';
+      this.engineNote.replaceChildren(icon(Icons.Download, 14), `Downloading ${NET.name}… `, el('b', '', amount));
+    } else if (st.state === 'error') {
+      this.engineNote.replaceChildren(icon(Icons.Cpu, 14), 'Hand-tuned evaluation · beam 96 × 10 plies');
+      this.engineError.replaceChildren(
+        icon(Icons.TriangleAlert, 15),
+        el('span', '', `Couldn't load the network (${st.message}). Otto plays the hand-tuned engine.`),
+      );
+    } else if (st.engine === 'nnue') {
+      this.engineNote.replaceChildren(icon(Icons.BrainCircuit, 14), 'NNUE value network · beam 96 × 6 plies');
+    } else {
+      this.engineNote.replaceChildren(icon(Icons.Cpu, 14), 'Hand-tuned evaluation · beam 96 × 10 plies');
+    }
   }
 
   private sync(): void {
     const s = settings.value;
+    this.syncEngine();
     this.ppsInput.value = String(s.pps);
     setFill(this.ppsInput);
     this.ppsValue.replaceChildren(s.pps.toFixed(1), el('span', 'unit', 'pps'));

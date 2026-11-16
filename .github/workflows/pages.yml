@@ -12,6 +12,7 @@ on:
       - "crates/sim/**"
       - "crates/bot/**"
       - "weights.json"
+      - ".gitattributes"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/pages.yml"
@@ -34,7 +35,10 @@ jobs:
       run:
         working-directory: web
     steps:
+      # The networks in web/public/nets/ are Git LFS objects.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: dtolnay/rust-toolchain@stable
         with:

@@ -544,6 +544,85 @@ input:focus-visible {
   display: none;
 }
 
+/* Engine switch: two toggle buttons in a well. */
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.segmented button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-muted);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 120ms,
+    border-color 120ms,
+    color 120ms;
+}
+
+.segmented button:hover {
+  color: var(--fg);
+}
+
+.segmented button[aria-pressed='true'] {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+  color: var(--fg);
+}
+
+.segmented button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.seg-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.seg-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+.segmented button[aria-pressed='true'] .seg-sub {
+  color: var(--brand);
+}
+
+.progress {
+  height: 2px;
+  margin-top: -8px;
+  border-radius: 1px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.progress > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--brand);
+  transition: width 120ms linear;
+}
+
+.progress[hidden] {
+  display: none;
+}
+
 /* Range inputs: thin track, green fill (set via --fill), round thumb. */
 input[type='range'] {
   -webkit-appearance: none;
