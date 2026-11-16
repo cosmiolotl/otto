@@ -1,4 +1,4 @@
-//! The bot's parameters: one flat, named, serde-serialisable vector (`weights/*.json`).
+//! The bot's parameters: one flat, named, serde-serialisable vector (a weights `.json` file).
 //!
 //! Every evaluation weight and every controller threshold is an `f32` field, so the M5 CMA-ES tuner
 //! (`crates/selfplay`) can treat the whole thing as a vector ([`Weights::to_vec`] /
@@ -176,7 +176,7 @@ pub fn preset(name: &str) -> Option<Weights> {
 
 pub const PRESETS: [&str; 3] = ["default", "steady", "greedy-app"];
 
-/// A preset name or a path to a `weights/*.json` file.
+/// A preset name or a path to a weights `.json` file.
 pub fn load(spec: &str) -> Result<Weights, String> {
     if let Some(w) = preset(spec) {
         return Ok(w);

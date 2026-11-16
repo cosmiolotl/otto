@@ -7,6 +7,7 @@
 //! - [`report`]: per-bot totals (APP, spikes, cancelled/landed, controller modes, loss causes).
 //! - [`stats`], [`rating`]: confidence intervals and tests; Bradley-Terry ratings with bootstrap CIs.
 //! - [`headtohead`]: two bots at fixed speeds (`sim bot-vs-bot`).
+//! - [`sprt`]: the sequential test (GSPRT on pair results) that `sim bot-vs-bot --sprt` gates with.
 //! - [`tournament`]: round robin over a roster (`sim tournament`).
 //! - [`cmaes`], [`tune`]: CMA-ES over [`tetris_bot::Weights`] with fitness = score against a mixed pool,
 //!   checkpointed every generation so a run can resume (`sim tune`).
@@ -20,6 +21,7 @@ pub mod headtohead;
 pub mod rating;
 pub mod report;
 pub mod schedule;
+pub mod sprt;
 pub mod stats;
 pub mod tournament;
 pub mod tune;

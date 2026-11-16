@@ -44,7 +44,7 @@ def main(argv=None) -> int:
             bad += 1
             if bad <= 5:
                 print(f"sample {i}: rust {r} reference {want}")
-    print(f"parity: {len(rust) - bad}/{len(rust)} samples identical")
+    print(f"parity ({ds.layout.feature_set}): {len(rust) - bad}/{len(rust)} samples identical")
     return 1 if bad else 0
 
 

@@ -8,7 +8,9 @@
 //! ```
 //!
 //! The accumulator width `L1` is a property of the network file (v1 and v2: 256), any multiple of 128 up
-//! to [`L1_MAX`]. Buffers are sized for [`L1_MAX`] and only the first `l1` entries are used.
+//! to [`L1_MAX`]. Buffers are sized for [`L1_MAX`] and only the first `l1` entries are used. So is the
+//! feature [`Layout`]: a `rows-v1-plan` network has the plan block's rows after the `rows-v1` ones, and its
+//! side to move's features end with the plan features ([`Network::evaluate_with`]).
 //!
 //! Quantization (float value = integer / scale):
 //!
@@ -27,8 +29,10 @@
 
 use tetris_sim::{PlayerState, SplitMix};
 
-use super::features::{self, Features, N_BUCKETS, N_FEATURES, PENDING_MAX};
-use super::kernels::{Kernels, Scalar};
+use super::features::{self, Features, Layout, N_BUCKETS, PENDING_MAX};
+use super::forward;
+use super::kernels::Scalar;
+pub use super::opponent::OpponentTable;
 
 /// Largest supported accumulator width per perspective.
 pub const L1_MAX: usize = 512;
@@ -43,27 +47,13 @@ pub const L3: usize = 32;
 pub const FT_Q: i32 = 255;
 pub const A_Q: i32 = 127;
 pub const W_Q: i32 = 64;
-const W_SHIFT: u32 = 6;
 
 /// The supported accumulator widths: multiples of 128 (the AVX2 refresh tile) up to [`L1_MAX`]. Each one
-/// gets its own compiled forward pass ([`with_width`]).
+/// gets its own compiled forward pass (`forward::with_width`).
 pub const SUPPORTED_L1: [usize; 4] = [128, 256, 384, 512];
 
 pub fn supported_l1(l1: usize) -> bool {
     SUPPORTED_L1.contains(&l1)
-}
-
-/// Calls `$f::<$k, L1, L1 / 2>($args)` for the network's width (one monomorphised copy per width).
-macro_rules! with_width {
-    ($l1:expr, $f:ident::<$k:ty>($($arg:expr),*)) => {
-        match $l1 {
-            128 => $f::<$k, 128, 64>($($arg),*),
-            256 => $f::<$k, 256, 128>($($arg),*),
-            384 => $f::<$k, 384, 192>($($arg),*),
-            512 => $f::<$k, 512, 256>($($arg),*),
-            l1 => unreachable!("unsupported accumulator width {l1}"),
-        }
-    };
 }
 
 /// One perspective's first-layer sums (the first `l1` entries).
@@ -105,73 +95,22 @@ pub struct Network {
     pub desc: String,
     /// Accumulator width per perspective ([`supported_l1`]).
     pub l1: usize,
+    /// Feature layout (stored in the file as its hash).
+    pub layout: Layout,
     pub ft_b: Box<Accumulator>,
-    /// `N_FEATURES` rows of `l1` weights.
+    /// `layout.n_features()` rows of `l1` weights.
     pub ft_w: Vec<i16>,
     pub stacks: Vec<LayerStack>,
-    /// Use the AVX2 kernels (runtime-detected; always false off x86-64).
+    /// Use the AVX2 kernels (AVX2 and POPCNT runtime-detected; always false off x86-64).
     #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
-    avx2: bool,
-}
-
-/// The opponent's perspective for each `pending` value (see [`Network::opponent_table`]).
-#[derive(Clone, Debug)]
-pub struct OpponentTable {
-    pub base_pending: u32,
-    pub sides: Box<[SideOut; PENDING_MAX + 1]>,
-}
-
-// The forward pass, once, over a kernel set. `#[inline(always)]` so that the AVX2 entry points
-// (`kernels::avx2`) get their own copy compiled with AVX2 enabled.
-
-#[inline(always)]
-pub(super) fn side<K: Kernels>(net: &Network, feats: &[u16], out: &mut [u8]) {
-    with_width!(net.l1, side_n::<K>(net, feats, out))
-}
-
-#[inline(always)]
-fn side_n<K: Kernels, const L: usize, const H: usize>(net: &Network, feats: &[u16], out: &mut [u8]) {
-    let mut acc = [0i16; L];
-    K::refresh::<L>(net.ft_b.0[..L].try_into().unwrap(), &net.ft_w, feats, &mut acc);
-    let (a, b) = acc.split_at(H);
-    K::pairwise::<H>(a.try_into().unwrap(), b.try_into().unwrap(), (&mut out[..H]).try_into().unwrap());
-}
-
-#[inline(always)]
-fn propagate<K: Kernels, const L: usize>(st: &LayerStack, input: &[u8; L]) -> i32 {
-    let mut h2 = [0u8; L3_IN];
-    for o in 0..L2 {
-        let v = (st.l2_b[o] + K::dot::<L>(input, st.l2_w[o][..L].try_into().unwrap())) >> W_SHIFT;
-        let c = v.clamp(0, A_Q);
-        h2[o] = c as u8;
-        h2[L2 + o] = ((c * c) >> 7) as u8;
-    }
-    let mut h3 = [0u8; L3];
-    for o in 0..L3 {
-        let v = (st.l3_b[o] + K::dot(&h2, &st.l3_w[o])) >> W_SHIFT;
-        h3[o] = v.clamp(0, A_Q) as u8;
-    }
-    st.out_b + K::dot(&h3, &st.out_w)
-}
-
-#[inline(always)]
-pub(super) fn eval<K: Kernels>(net: &Network, me: &[u16], opp: &SideOut, bucket: usize) -> i32 {
-    with_width!(net.l1, eval_n::<K>(net, me, opp, bucket))
-}
-
-#[inline(always)]
-fn eval_n<K: Kernels, const L: usize, const H: usize>(net: &Network, me: &[u16], opp: &SideOut, bucket: usize) -> i32 {
-    let mut input = [0u8; L];
-    side_n::<K, L, H>(net, me, &mut input[..H]);
-    input[H..].copy_from_slice(&opp[..H]);
-    propagate::<K, L>(&net.stacks[bucket], &input)
+    pub(super) avx2: bool,
 }
 
 impl Network {
     fn detect_avx2() -> bool {
         #[cfg(target_arch = "x86_64")]
         {
-            std::is_x86_feature_detected!("avx2")
+            std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("popcnt")
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
@@ -184,14 +123,20 @@ impl Network {
         Network::zeroed_l1(L1_DEFAULT)
     }
 
-    /// A zero network of width `l1` (panics unless [`supported_l1`]).
+    /// A zero `rows-v1` network of width `l1` (panics unless [`supported_l1`]).
     pub fn zeroed_l1(l1: usize) -> Network {
+        Network::zeroed_layout(Layout::RowsV1, l1)
+    }
+
+    /// A zero network of this layout and width `l1` (panics unless [`supported_l1`]).
+    pub fn zeroed_layout(layout: Layout, l1: usize) -> Network {
         assert!(supported_l1(l1), "unsupported accumulator width {l1}");
         Network {
             desc: String::new(),
             l1,
+            layout,
             ft_b: Box::new(Accumulator([0; L1_MAX])),
-            ft_w: vec![0; N_FEATURES * l1],
+            ft_w: vec![0; layout.n_features() * l1],
             stacks: vec![LayerStack::default(); N_BUCKETS],
             avx2: Self::detect_avx2(),
         }
@@ -202,11 +147,16 @@ impl Network {
         Network::random_l1(seed, L1_DEFAULT)
     }
 
-    /// Random weights of width `l1` in the trainer's clamp ranges.
+    /// Random `rows-v1` weights of width `l1` in the trainer's clamp ranges.
     pub fn random_l1(seed: u64, l1: usize) -> Network {
+        Network::random_layout(seed, Layout::RowsV1, l1)
+    }
+
+    /// Random weights of this layout and width `l1` in the trainer's clamp ranges.
+    pub fn random_layout(seed: u64, layout: Layout, l1: usize) -> Network {
         let mut rng = SplitMix(seed ^ 0x5851_f42d_4c95_7f2d);
         let mut r = |lo: i32, hi: i32| lo + rng.below((hi - lo + 1) as u64) as i32;
-        let mut n = Network::zeroed_l1(l1);
+        let mut n = Network::zeroed_layout(layout, l1);
         n.desc = format!("random seed {seed}");
         for b in n.ft_b.0[..l1].iter_mut() {
             *b = r(0, 2 * FT_Q / 3) as i16;
@@ -225,6 +175,12 @@ impl Network {
         n
     }
 
+    /// Use the portable kernels even where AVX2 is available (tests and benchmarks; results are
+    /// identical).
+    pub fn use_portable_kernels(&mut self) {
+        self.avx2 = false;
+    }
+
     /// Integer output → logit (natural-log odds that the side to move wins).
     #[inline]
     pub fn logit(raw: i32) -> f32 {
@@ -238,7 +194,7 @@ impl Network {
             // SAFETY: AVX2 support was detected at construction.
             return unsafe { super::kernels::avx2::side(self, feats, out) };
         }
-        side::<Scalar>(self, feats, out)
+        forward::side::<Scalar>(self, feats, out)
     }
 
     /// Raw output for the side to move (`me`) against a precomputed opponent perspective.
@@ -248,7 +204,7 @@ impl Network {
             // SAFETY: AVX2 support was detected at construction.
             return unsafe { super::kernels::avx2::eval(self, me, opp, bucket) };
         }
-        eval::<Scalar>(self, me, opp, bucket)
+        forward::eval::<Scalar>(self, me, opp, bucket)
     }
 
     /// Raw output from two feature lists ([`Network::eval`] reuses a prepared opponent side).
@@ -258,29 +214,24 @@ impl Network {
         self.eval(me, &o, bucket)
     }
 
-    /// The opponent's perspective for every possible `pending` value: their board, pieces, chain and clock
-    /// are fixed during a search, only the incoming total grows with what the searching player sends.
-    pub fn opponent_table(&self, opp: &PlayerState, opp_fpp: u32) -> OpponentTable {
-        let mut f = Features::default();
-        features::extract_static(opp, opp_fpp, &mut f);
-        let base_pending = opp.garbage.size();
-        let n = f.len;
-        let mut out = OpponentTable { base_pending, sides: Box::new([[0; HALF_MAX]; PENDING_MAX + 1]) };
-        for (k, side) in out.sides.iter_mut().enumerate() {
-            f.idx[n] = features::pending_feature(k as u32);
-            f.len = n + 1;
-            self.side(f.as_slice(), side);
-        }
-        out
+    /// Value of `me` (the side to move, `my_fpp` frames per piece) against a prepared opponent who has
+    /// `sent` more incoming lines than at preparation time. Returns the logit. For a `rows-v1` network
+    /// (a `rows-v1-plan` network gets the plan features from [`Network::evaluate_with`]).
+    #[inline]
+    pub fn evaluate(&self, me: &PlayerState, my_fpp: u32, opp: &OpponentTable, sent: u32) -> f32 {
+        self.evaluate_with(me, my_fpp, opp, sent, &[])
     }
 
-    /// Value of `me` (the side to move, `my_fpp` frames per piece) against a prepared opponent who has
-    /// `sent` more incoming lines than at preparation time. Returns the logit.
-    pub fn evaluate(&self, me: &PlayerState, my_fpp: u32, opp: &OpponentTable, sent: u32) -> f32 {
+    /// [`Network::evaluate`] with `extra` features appended to the side to move's: the move's
+    /// [`features::plan_features`] for a `rows-v1-plan` network, nothing for `rows-v1`.
+    #[inline]
+    pub fn evaluate_with(&self, me: &PlayerState, my_fpp: u32, opp: &OpponentTable, sent: u32, extra: &[u16]) -> f32 {
+        debug_assert_eq!(extra.len(), if self.layout.has_plan() { features::PLAN_ACTIVE } else { 0 });
         let mut f = Features::default();
         features::extract(me, my_fpp, &mut f);
+        f.extend(extra);
         let k = (opp.base_pending + sent).min(PENDING_MAX as u32) as usize;
-        Network::logit(self.eval(f.as_slice(), &opp.sides[k], features::bucket(me)))
+        Network::logit(self.eval_prepared(f.as_slice(), opp, k, features::bucket(me)))
     }
 }
 
@@ -342,6 +293,40 @@ mod tests {
         for l1 in [128, L1_DEFAULT, L1_MAX] {
             optimised_matches_reference_at(l1);
         }
+    }
+
+    #[test]
+    fn plan_layout_matches_reference() {
+        use crate::controller::{Mode, Plan};
+        let net = Network::random_layout(5, Layout::RowsV1Plan, L1_DEFAULT);
+        assert_eq!(net.ft_w.len(), features::N_FEATURES_PLAN * L1_DEFAULT);
+        let states = sample_states();
+        let mut differ = 0;
+        for (i, me) in states.iter().enumerate() {
+            let opp = &states[(i + 2) % states.len()];
+            let mode = [Mode::Build, Mode::Kill, Mode::Cancel][i % 3];
+            let plan = features::plan_features(&Plan { mode, opp_burst: i as f32 * 2.0, opp_fill: i as f32 / 7.0 });
+            let (mut a, mut b) = (Features::default(), Features::default());
+            features::extract(me, 24, &mut a);
+            a.extend(&plan);
+            features::extract(opp, 26, &mut b);
+            let bk = features::bucket(me);
+            let r = reference(&net, a.as_slice(), b.as_slice(), bk);
+            assert_eq!(net.eval_pair(a.as_slice(), b.as_slice(), bk), r);
+            let mut slow = net.clone();
+            slow.avx2 = false;
+            assert_eq!(slow.eval_pair(a.as_slice(), b.as_slice(), bk), r);
+            for n in [&net, &slow] {
+                let t = n.opponent_table(opp, 26);
+                assert_eq!(n.evaluate_with(me, 24, &t, 0, &plan), Network::logit(r));
+            }
+            // The plan rows are read (with random weights, another mode usually gives another score).
+            let mut other = plan;
+            other[0] = (features::PLAN_MODE + (mode.index() + 1) % 3) as u16;
+            let t = net.opponent_table(opp, 26);
+            differ += (net.evaluate_with(me, 24, &t, 0, &other) != Network::logit(r)) as usize;
+        }
+        assert!(differ > 0, "the plan rows are read");
     }
 
     fn optimised_matches_reference_at(l1: usize) {

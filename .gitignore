@@ -21,6 +21,7 @@ Thumbs.db
 /oracle/
 /traces/
 
+.env
 
 # @TODO write formal docs
 /docs/

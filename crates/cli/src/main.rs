@@ -58,9 +58,12 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "bot-vs-bot",
         args: "--a BOT --b BOT [--games N] [--seed S] [--pps a,b] [--width W] [--width-a W] [--width-b W]\n\
+               [--depth D] [--depth-a D] [--depth-b D]\n\
                [--extra-a N] [--extra-b N] [--k-a K] [--k-b K] [--max-pieces P] [--jitter J]\n\
-               [--dump-requests DIR [--dump N]] [--log]",
-        about: "paired-seed bot match (docs/BOT.md)",
+               [--dump-requests DIR [--dump N]] [--log]\n\
+               [--sprt ELO0,ELO1 [--alpha A] [--beta B] [--batch PAIRS]]  (--games is then the maximum)\n\
+               [--ft N]  (a first-to-N set over the games in order)",
+        about: "paired-seed bot match (docs/BOT.md); --sprt stops at a GSPRT decision",
         run: bot_cmds::bot_vs_bot,
     },
     Command {
@@ -85,7 +88,8 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "datagen",
         args: "--bots a,b,.. --games N --out STEM [--width W] [--every K] [--seed S] [--pps lo,hi] [--varied]\n\
-               [--max-pieces P] [--batch B] [--siblings K] [--teacher WEIGHTS] [--keep-clears]",
+               [--max-pieces P] [--batch B] [--siblings K] [--teacher SPEC] [--keep-clears]\n\
+               [--sibling-search DEPTH,WIDTH] [--plan-features]",
         about: "value-net training data (docs/NNUE.md)",
         run: nnue_cmds::datagen,
     },
@@ -110,7 +114,8 @@ fn usage() -> ExitCode {
         eprintln!("  sim {} {}", c.name, c.args.replace('\n', &format!("\n{indent}")));
         eprintln!("      {}", c.about);
     }
-    eprintln!("A BOT is a preset (default, steady, greedy-app), a weights .json, or a value network .nnue.");
+    eprintln!("A BOT is a preset (default, steady, greedy-app), a weights .json, or a value network .nnue;");
+    eprintln!("NET.nnue@WEIGHTS runs the release controller with WEIGHTS (required for rows-v1-plan nets).");
     ExitCode::from(2)
 }
 

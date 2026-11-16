@@ -32,7 +32,9 @@ META = np.dtype(
     ]
 )
 assert META.itemsize == 32
-DATA_FORMATS = (1, 2)  # format 1 has no siblings (its `sib` field is always 0)
+DATA_FORMATS = (1, 2)
+# Scales of the teacher scores (`sim datagen` settings `teacher_kind`): hand-eval points or network logits.
+TEACHER_KINDS = ("hand", "nnue")  # format 1 has no siblings (its `sib` field is always 0)
 CHOSEN = 1 << 15
 
 # Every `VAL_EVERY`-th game is validation data, so positions of one game never straddle the split.
@@ -60,7 +62,18 @@ class DataSet:
         if h["format"] not in DATA_FORMATS or h["meta_bytes"] != META.itemsize:
             raise ValueError(f"{stem}: data format {h['format']} with {h['meta_bytes']}-byte records, "
                              f"trainer reads formats {DATA_FORMATS} with {META.itemsize}-byte records")
-        self.siblings = int(h.get("settings", {}).get("siblings", 0))
+        self.stem = str(stem)
+        settings = h.get("settings", {})
+        self.siblings = int(settings.get("siblings", 0))
+        # [depth, width] if `sim datagen --sibling-search` labelled siblings and decisions with the teacher's
+        # search value; None (older data too): siblings' search_score = static, decisions' = the bot's.
+        self.sibling_search = settings.get("sibling_search")
+        # The teacher's scale ("hand" for older data) and spec (None: older data, or each seat's own weights).
+        self.teacher_kind = settings.get("teacher_kind", "hand")
+        self.teacher_spec = settings.get("teacher_spec")
+        if self.teacher_kind not in TEACHER_KINDS:
+            raise ValueError(f"{stem}: teacher kind {self.teacher_kind!r}, trainer knows {TEACHER_KINDS}")
+        self.bots = tuple(sorted(b["name"] for b in settings.get("bots", [])))
         self.meta = np.memmap(f"{stem}.meta", dtype=META, mode="r")
         self.feat = np.memmap(f"{stem}.feat", dtype="<u2", mode="r")
         if (len(self.meta), len(self.feat)) != (h["samples"], h["features"]):
@@ -69,6 +82,15 @@ class DataSet:
 
     def __len__(self) -> int:
         return len(self.meta)
+
+    def calib_key(self, field: str) -> tuple:
+        """Data sets with equal keys share one fitted teacher calibration of `<field>_score` (target.py): same
+        teacher kind and spec, and for the search field the same search (`--sibling-search`), or without it
+        the same roster (then decisions carry the playing bots' own scores)."""
+        key = (self.teacher_kind, self.teacher_spec)
+        if field == "search":
+            key += (str(self.sibling_search),) if self.sibling_search is not None else ("bots",) + self.bots
+        return key
 
     def sample(self, i: int) -> tuple[np.ndarray, np.ndarray, int]:
         """Sample `i`: (my features, the opponent's features, my bucket)."""
@@ -92,6 +114,7 @@ class Batch:
     pos: np.ndarray  # int64 per sibling: its position in the group, 0..K-1
     sib_idx: np.ndarray  # int64 per sibling: its position in the batch
     chosen: np.ndarray  # float32 per sibling: 1 for the bot's move
+    set_id: np.ndarray  # int64 per record: its data set's index in the loader's list (per-set calibration)
 
     def to(self, dev):
         """The same batch as torch tensors on `dev` (indices int64, the rest float32)."""
@@ -112,8 +135,10 @@ def _gather(feat: np.ndarray, starts: np.ndarray, lens: np.ndarray) -> tuple[np.
     return feat[pos].astype(np.int64), off
 
 
-def make_batch(feat: np.ndarray, m: np.ndarray, swap: np.ndarray | None = None) -> Batch:
-    """Batch from meta records `m` whose `offset` indexes `feat`. `swap[i]` exchanges the perspectives."""
+def make_batch(feat: np.ndarray, m: np.ndarray, swap: np.ndarray | None = None,
+               set_id: np.ndarray | None = None) -> Batch:
+    """Batch from meta records `m` whose `offset` indexes `feat`. `swap[i]` exchanges the perspectives;
+    `set_id[i]` is record i's data set (default 0)."""
     me_start = m["offset"].astype(np.int64)
     opp_start = me_start + m["n_me"]
     me_len, opp_len = m["n_me"], m["n_opp"]
@@ -140,6 +165,7 @@ def make_batch(feat: np.ndarray, m: np.ndarray, swap: np.ndarray | None = None) 
         np.flatnonzero(root).astype(np.int64), grp.astype(np.int64).reshape(-1),
         ((m["sib"][sib] & ~np.uint16(CHOSEN)).astype(np.int64) - 1), np.flatnonzero(sib).astype(np.int64),
         ((m["sib"][sib] & CHOSEN) != 0).astype(np.float32),
+        np.zeros(len(m), dtype=np.int64) if set_id is None else set_id.astype(np.int64),
     )
 
 
@@ -191,34 +217,37 @@ class Loader:
                 hi = int(m["offset"][-1]) + int(m["n_me"][-1]) + int(m["n_opp"][-1])
                 feat = np.array(s.feat[lo:hi])
                 m["offset"] -= lo
-                parts.append((feat, m))
+                parts.append((feat, m, si))
             if not parts:
                 continue
-            feats, metas, base = [], [], 0
-            for feat, m in parts:
+            feats, metas, sids, base = [], [], [], 0
+            for feat, m, si in parts:
                 m = m.copy()
                 m["offset"] += base
                 base += len(feat)
                 feats.append(feat)
                 metas.append(m)
+                sids.append(np.full(len(m), si, dtype=np.int64))
             feat = np.concatenate(feats)
             meta = np.concatenate(metas)
+            sid = np.concatenate(sids)
             root = is_root(meta)
             if self.train:
                 gid = np.cumsum(root) - 1
-                meta = meta[np.argsort(self.rng.permutation(int(root.sum()))[gid], kind="stable")]
+                order = np.argsort(self.rng.permutation(int(root.sum()))[gid], kind="stable")
+                meta, sid = meta[order], sid[order]
                 root = is_root(meta)
             starts = np.flatnonzero(root)
             b = 0
             while b < len(meta):
                 k = np.searchsorted(starts, b + self.batch)
                 e = int(starts[k]) if k < len(starts) else len(meta)
-                mb = meta[b:e]
+                mb, sb = meta[b:e], sid[b:e]
                 b = e
                 if self.train and len(mb) < self.batch // 2:
                     continue
                 swap = self.rng.random(len(mb)) < self.swap_prob if self.swap_prob > 0 else None
-                yield make_batch(feat, mb, swap)
+                yield make_batch(feat, mb, swap, sb)
 
     def count(self) -> int:
         return int(sum(self._keep(np.array(s.meta)).sum() for s in self.sets))

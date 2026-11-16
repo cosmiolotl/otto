@@ -9,7 +9,8 @@ The factoriser of each block ([`FACTORISERS`]):
   height   height (x, h):         W[x,h] + Σ_{k≤h} T[x,k] + Σ_{k≤h} S[k]          (thermometer)
   shared   step2 (x, d), step3 (x, d1, d2), next (i, p):  W[x, ...] + D[...]    (shared over x / i)
   thermo   b2b/combo/pending/ready/clock/speed (k):  W[k] + Σ_{j≤k} T[j]        (thermometer)
-  plain    current, hold, last_clear
+  plain    current, hold, last_clear, plan_mode
+  thermo   plan_opp_burst, plan_opp_fill (layout rows-v1-plan only; the side to move's controller plan)
 
 Because the FT is linear, folding is exact; export writes only the folded matrix. The folded weights are
 clamped to ±FT_W_MAX in the forward pass, as the int16 accumulator requires.
@@ -42,6 +43,10 @@ FACTORISERS = {
     "ready": "thermo",
     "clock": "thermo",
     "speed": "thermo",
+    # rows-v1-plan only (the side to move's release-controller plan; never set on the opponent's half).
+    "plan_mode": "plain",
+    "plan_opp_burst": "thermo",
+    "plan_opp_fill": "thermo",
 }
 
 
@@ -57,9 +62,9 @@ class FeatureTransformer(nn.Module):
         if not supported_l1(l1):
             raise ValueError(f"unsupported accumulator width {l1}")
         self.l1 = l1
-        unknown = set(layout.blocks) ^ set(FACTORISERS)
+        unknown = set(layout.blocks) - set(FACTORISERS)
         if unknown:
-            raise ValueError(f"blocks without a factoriser, or factorisers without a block: {sorted(unknown)}")
+            raise ValueError(f"blocks without a factoriser: {sorted(unknown)}")
         self.layout = layout
 
         def z(*shape):

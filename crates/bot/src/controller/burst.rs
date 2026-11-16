@@ -14,7 +14,7 @@ use crate::hash::{PassThrough, state_hash};
 use crate::obs::PlayerView;
 use crate::search::GEN_MODE;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Burst {
     beam: Vec<(PlayerState, f32, f32)>,
     next: Vec<(PlayerState, f32, f32)>,

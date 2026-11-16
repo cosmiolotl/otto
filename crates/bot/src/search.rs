@@ -1,8 +1,8 @@
 //! Beam search over own placements.
 //!
 //! - Ply 0 expands the root's movegen output ([`GEN_MODE`], hold branch included); every later ply
-//!   expands each beam node the same way. A child is `clone + apply_placement` (scored), and kept nodes
-//!   are advanced by `tick_n(fpp)`, so garbage arrival, tanking on non-clearing locks, cancelling and the
+//!   expands each beam node the same way. A child is `clone + apply_placement`; a node's live children are
+//!   scored together ([`Evaluator::eval_children`]), and kept nodes are advanced by `tick_n(fpp)`, so garbage arrival, tanking on non-clearing locks, cancelling and the
 //!   multiplier all happen inside the search.
 //! - Children are first stored as light candidates (parent, placement, score, path terms). The best are
 //!   materialised again in that order (apply + tick), deduplicated by a state hash (transpositions),
@@ -80,6 +80,48 @@ pub struct Search {
     next: Vec<Node>,
     cands: Vec<Cand>,
     seen: HashSet64,
+    kids: Children,
+}
+
+/// One expanded node's live children, scored together: states (the first `len` are valid; the buffer only
+/// grows), paths, scores, and per child (placement, move index, root move).
+#[derive(Debug, Default)]
+struct Children {
+    states: Vec<PlayerState>,
+    paths: Vec<PathAcc>,
+    scores: Vec<f32>,
+    meta: Vec<(Placement, u16, u16)>,
+    len: usize,
+}
+
+impl Children {
+    fn clear(&mut self) {
+        self.paths.clear();
+        self.meta.clear();
+        self.len = 0;
+    }
+
+    /// A slot holding a copy of `parent`, to become the next child.
+    fn slot(&mut self, parent: &PlayerState) -> &mut PlayerState {
+        if self.len == self.states.len() {
+            self.states.push(parent.clone());
+        } else {
+            self.states[self.len].clone_from(parent);
+        }
+        &mut self.states[self.len]
+    }
+
+    /// Keep the child in the slot.
+    fn push(&mut self, path: PathAcc, meta: (Placement, u16, u16)) {
+        self.paths.push(path);
+        self.meta.push(meta);
+        self.len += 1;
+    }
+
+    fn score<E: Evaluator>(&mut self, eval: &E, parent: &PlayerState) {
+        self.scores.resize(self.len, 0.0);
+        eval.eval_children(parent, &self.states[..self.len], &self.paths, &mut self.scores);
+    }
 }
 
 /// Score for a child that topped out at ply `ply` (later deaths are less bad).
@@ -99,6 +141,35 @@ impl Search {
         eval: &E,
         opts: &SearchOptions,
         tails: &[PieceQueue],
+    ) -> Option<SearchResult> {
+        self.run_impl(root, fpp, eval, opts, tails, None)
+    }
+
+    /// [`Search::run`] with the first placement forced to `first`: ply 0 expands only that root move, so
+    /// the whole beam is spent on its subtree, and the result's score is the search value of playing it
+    /// (the same quantity as `run`'s score had `run` chosen it). With `depth` 1 that is exactly
+    /// `eval(child, path of the one lock)`. `None` if `first` is not in the root's movegen output
+    /// ([`GEN_MODE`], hold branch included).
+    pub fn run_forced<E: Evaluator>(
+        &mut self,
+        root: &PlayerState,
+        fpp: u32,
+        eval: &E,
+        opts: &SearchOptions,
+        tails: &[PieceQueue],
+        first: Placement,
+    ) -> Option<SearchResult> {
+        self.run_impl(root, fpp, eval, opts, tails, Some(first))
+    }
+
+    fn run_impl<E: Evaluator>(
+        &mut self,
+        root: &PlayerState,
+        fpp: u32,
+        eval: &E,
+        opts: &SearchOptions,
+        tails: &[PieceQueue],
+        first: Option<Placement>,
     ) -> Option<SearchResult> {
         let gopts = GenOptions::new(GEN_MODE, true);
         let discount = eval.discount();
@@ -130,10 +201,15 @@ impl Search {
                     movegen::generate(&node.state, gopts, &mut self.buf);
                     &self.buf
                 };
+                let kids = &mut self.kids;
+                kids.clear();
                 for (mi, &p) in moves.iter().enumerate() {
-                    scratch.clone_from(&node.state);
-                    let b2b0 = scratch.chain.b2b;
-                    let out = scratch.apply_placement(p);
+                    if ply == 0 && first.is_some_and(|f| f != p) {
+                        continue;
+                    }
+                    let child = kids.slot(&node.state);
+                    let b2b0 = child.chain.b2b;
+                    let out = child.apply_placement(p);
                     let mut acc = node.acc;
                     acc.push(&out, b2b0, discount);
                     let r = if ply == 0 { mi as u16 } else { node.root };
@@ -142,9 +218,13 @@ impl Search {
                         note_dead(death_score(ply), r);
                         continue;
                     }
-                    // The eval does not depend on the clock, so only kept nodes are ticked (below).
-                    let score = eval.eval(&scratch, &acc);
-                    self.cands.push(Cand { parent: pi as u32, root: r, p, mi: mi as u16, score, acc });
+                    kids.push(acc, (p, mi as u16, r));
+                }
+                // The eval does not depend on the clock, so only kept nodes are ticked (below).
+                kids.score(eval, &node.state);
+                for k in 0..kids.len {
+                    let ((p, mi, r), score, acc) = (kids.meta[k], kids.scores[k], kids.paths[k]);
+                    self.cands.push(Cand { parent: pi as u32, root: r, p, mi, score, acc });
                 }
             }
             if self.cands.is_empty() {
@@ -228,34 +308,41 @@ impl Search {
                 for ply in 0..opts.extra_plies {
                     self.buf.clear();
                     movegen::generate(&s, gopts, &mut self.buf);
-                    let mut best: Option<(f32, PlayerState, PathAcc)> = None;
-                    for &p in &self.buf {
-                        let mut c = s.clone();
+                    // Live children are scored together; the meta's move index marks them.
+                    let kids = &mut self.kids;
+                    kids.clear();
+                    for (mi, &p) in self.buf.iter().enumerate() {
+                        let c = kids.slot(&s);
                         let b2b0 = c.chain.b2b;
                         let out = c.apply_placement(p);
                         let mut a = acc;
                         a.push(&out, b2b0, discount);
                         nodes += 1;
-                        let v = if out.topout {
-                            death_score(opts.depth + ply)
-                        } else {
+                        if !out.topout {
                             c.tick_n(fpp);
-                            eval.eval(&c, &a)
-                        };
-                        if best.as_ref().is_none_or(|b| v > b.0) {
-                            best = Some((v, c, a));
+                            kids.push(a, (p, mi as u16, 0));
                         }
                     }
-                    let Some((v, c, a)) = best else {
+                    kids.score(eval, &s);
+                    // The first best in move order; a topped-out move scores `death_score` and ends the line.
+                    let mut best: Option<(f32, Option<usize>)> = None;
+                    let mut k = 0;
+                    for mi in 0..self.buf.len() {
+                        let live = k < kids.len && kids.meta[k].1 as usize == mi;
+                        let v = if live { kids.scores[k] } else { death_score(opts.depth + ply) };
+                        if best.is_none_or(|b| v > b.0) {
+                            best = Some((v, live.then_some(k)));
+                        }
+                        k += live as usize;
+                    }
+                    let Some((v, live)) = best else {
                         value = death_score(opts.depth + ply);
                         break;
                     };
                     value = v;
-                    if c.topped_out {
-                        break;
-                    }
-                    s = c;
-                    acc = a;
+                    let Some(k) = live else { break };
+                    s.clone_from(&kids.states[k]);
+                    acc = kids.paths[k];
                 }
                 sum += value;
             }
@@ -288,6 +375,48 @@ mod tests {
             assert!(!out.topout);
         }
         assert!(s.board.top() < 12, "a sane bot keeps the stack low on an empty field: {:?}", s.board);
+    }
+
+    #[test]
+    fn forced_first_move() {
+        let eval = HandEval::new(Weights::default());
+        let mut s = PlayerState::tl(31);
+        let mut search = Search::default();
+        let mut moves = Vec::new();
+        for _ in 0..8 {
+            moves.clear();
+            movegen::generate(&s, GenOptions::new(GEN_MODE, true), &mut moves);
+            // Depth 1: the forced value is the child's eval with its one-lock path, and the best of them
+            // is the unforced search's.
+            let one = SearchOptions { width: 16, depth: 1, ..Default::default() };
+            let mut best = f32::NEG_INFINITY;
+            for &p in &moves {
+                let r = search.run_forced(&s, 24, &eval, &one, &[], p).unwrap();
+                assert_eq!(r.placement, p);
+                let mut c = s.clone();
+                let b2b = c.chain.b2b;
+                let out = c.apply_placement(p);
+                if !out.topout {
+                    let mut acc = PathAcc::default();
+                    acc.push(&out, b2b, eval.discount());
+                    assert_eq!(r.score, eval.eval(&c, &acc));
+                }
+                best = best.max(r.score);
+            }
+            assert_eq!(search.run(&s, 24, &eval, &one, &[]).unwrap().score, best);
+            // Deeper: the forced move is the one returned, deterministically.
+            let deep = SearchOptions { width: 8, depth: 4, ..Default::default() };
+            let r = search.run_forced(&s, 24, &eval, &deep, &[], moves[moves.len() / 2]).unwrap();
+            assert_eq!(r.placement, moves[moves.len() / 2]);
+            assert_eq!(Search::default().run_forced(&s, 24, &eval, &deep, &[], r.placement), Some(r));
+            let a = search.run(&s, 24, &eval, &deep, &[]).unwrap();
+            s.apply_placement(a.placement);
+            s.tick_n(24);
+        }
+        // A placement the root cannot make.
+        let mut bad = moves[0];
+        bad.y += 7;
+        assert_eq!(search.run_forced(&s, 24, &eval, &SearchOptions::default(), &[], bad), None);
     }
 
     #[test]

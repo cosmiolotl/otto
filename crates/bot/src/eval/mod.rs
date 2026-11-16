@@ -23,6 +23,26 @@ pub trait Evaluator {
 
     fn eval(&self, s: &PlayerState, path: &PathAcc) -> f32;
 
+    /// A hint before the children of `parent` are valued with [`Evaluator::eval`] (once per expanded node),
+    /// for evaluators that share work between a node and its children ([`NnueEval`]). Scores must not
+    /// depend on it. The default does nothing.
+    #[inline]
+    fn expand(&self, parent: &PlayerState) {
+        let _ = parent;
+    }
+
+    /// Score the children of `parent` into `out`: `children[i]` (reached along `paths[i]`), in order. The
+    /// search calls this once per expanded node rather than [`Evaluator::eval`] once per child, so that an
+    /// evaluator can share work between a parent's children ([`NnueEval`]). The scores must be exactly
+    /// `eval`'s; the default is [`Evaluator::expand`], then `eval` on each child.
+    #[inline]
+    fn eval_children(&self, parent: &PlayerState, children: &[PlayerState], paths: &[PathAcc], out: &mut [f32]) {
+        self.expand(parent);
+        for ((c, p), o) in children.iter().zip(paths).zip(out.iter_mut()) {
+            *o = self.eval(c, p);
+        }
+    }
+
     /// Per-ply discount of the path terms.
     fn discount(&self) -> f32 {
         1.0
@@ -114,6 +134,22 @@ impl Evaluator for AnyEval {
         match self {
             AnyEval::Hand(e) => e.eval(s, path),
             AnyEval::Nnue(e) => e.eval(s, path),
+        }
+    }
+
+    #[inline]
+    fn expand(&self, parent: &PlayerState) {
+        match self {
+            AnyEval::Hand(e) => e.expand(parent),
+            AnyEval::Nnue(e) => e.expand(parent),
+        }
+    }
+
+    #[inline]
+    fn eval_children(&self, parent: &PlayerState, children: &[PlayerState], paths: &[PathAcc], out: &mut [f32]) {
+        match self {
+            AnyEval::Hand(e) => e.eval_children(parent, children, paths, out),
+            AnyEval::Nnue(e) => e.eval_children(parent, children, paths, out),
         }
     }
 

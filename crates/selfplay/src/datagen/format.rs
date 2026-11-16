@@ -15,22 +15,26 @@
 //!   | 14 | u16 | pieces the side to move had placed |
 //!   | 16 | u16 | pieces the side to move still placed before the game ended |
 //!   | 18 | u16 | sibling: 0 for a decision; k ≥ 1 for its k-th sibling, bit 15 ([`CHOSEN`]) if it is the bot's move |
-//!   | 20 | f32 | decision: the bot's search score of its move; sibling: the teacher's score of the child |
-//!   | 24 | f32 | decision: the teacher's static evaluation (no path terms); sibling: as offset 20 |
+//!   | 20 | f32 | decision: the bot's search score of its move; sibling: as offset 24. With `--sibling-search D,W` (settings `sibling_search`): the teacher's search value at depth D, width W, unforced for a decision, first move forced to the child for a sibling |
+//!   | 24 | f32 | decision: the teacher's static evaluation (no path terms); sibling: the teacher's `eval(child, path of the one lock)` |
 //!   | 28 | u32 | game index within the file |
+//!
+//!   Both scores are on the teacher's scale: hand-eval points, or logits for a network teacher (settings
+//!   `teacher_kind`: `"hand"` or `"nnue"`; `teacher_spec`: the `--teacher` spec).
 //!
 //!   Siblings (`sim datagen --siblings K`) follow their decision record directly. They are one-ply children
 //!   (after the lock, from the side to move's view) and share the decision's result, mode, ply and game.
 //!
 //! - `STEM.json`: `{"format": 2, "samples": N, "decisions": D, "features": F, "meta_bytes": 32, "settings": {..},
-//!   "layout": <tetris_bot::nnue::layout_json()>}`. The layout is written verbatim: the trainer hashes it to match
+//!   "layout": <tetris_bot::nnue::Layout::json()>}` (`rows-v1`; `rows-v1-plan` with `--plan-features`).
+//!   The layout is written verbatim: the trainer hashes it to match
 //!   network files ([`tetris_bot::nnue::file::layout_hash`]).
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use tetris_bot::nnue::{Features, layout_json};
+use tetris_bot::nnue::{Features, Layout};
 
 pub const META_BYTES: usize = 32;
 /// 2: offset 18 holds the sibling field (it was reserved and 0 in format 1, which therefore reads as a
@@ -65,6 +69,8 @@ pub struct DataWriter {
     samples: u64,
     decisions: u64,
     settings: serde_json::Value,
+    /// Feature layout of the samples, written into `STEM.json` ([`DataWriter::with_layout`]).
+    layout: Layout,
 }
 
 fn with_ext(stem: &Path, ext: &str) -> PathBuf {
@@ -90,7 +96,14 @@ impl DataWriter {
             samples: 0,
             decisions: 0,
             settings,
+            layout: Layout::RowsV1,
         })
+    }
+
+    /// The samples' feature layout (`rows-v1` unless set).
+    pub fn with_layout(mut self, layout: Layout) -> DataWriter {
+        self.layout = layout;
+        self
     }
 
     pub fn push(&mut self, s: &Sample) -> io::Result<()> {
@@ -128,7 +141,7 @@ impl DataWriter {
             self.decisions,
             self.offset,
             self.settings,
-            layout_json()
+            self.layout.json()
         );
         std::fs::write(with_ext(&self.stem, "json"), json)?;
         Ok(self.samples)

@@ -6,6 +6,7 @@ use tetris_bot::BotSpec;
 use crate::conditions::FixedSpeed;
 use crate::report::{BotTotals, totals};
 use crate::schedule::{Job, PairResult, run};
+use crate::sprt::{Decision, Pentanomial, Sprt};
 use crate::stats::{binomial_two_sided, wilson};
 
 #[derive(Clone, Debug)]
@@ -21,7 +22,12 @@ pub struct HeadToHead {
 
 impl HeadToHead {
     pub fn jobs(&self) -> Vec<Job> {
-        (0..self.pairs)
+        self.jobs_in(0..self.pairs)
+    }
+
+    /// Pairs `range` (pair `i` is the same draw whatever else is played).
+    fn jobs_in(&self, range: std::ops::Range<usize>) -> Vec<Job> {
+        range
             .map(|i| {
                 let draw = self.speed.draw(self.seed ^ (i as u64).wrapping_mul(0xa076_1d64_78bd_642f));
                 Job::new((0, &self.a), (1, &self.b), &draw, i < self.record)
@@ -33,6 +39,38 @@ impl HeadToHead {
     pub fn run(&self) -> Vec<PairResult> {
         run(&self.jobs())
     }
+
+    /// Sequential test: play pairs `0..self.pairs` in batches of `batch` pairs (the last one possibly
+    /// shorter) and stop after the first batch whose cumulative LLR crosses a bound. The pairs played depend
+    /// only on the seed, `batch` and the results, never on the thread count.
+    pub fn run_sprt(&self, sprt: &Sprt, batch: usize) -> SprtRun {
+        let batch = batch.max(1);
+        let mut out = SprtRun { pairs: Vec::new(), penta: Pentanomial::default(), llr: Vec::new(), decision: None };
+        while out.pairs.len() < self.pairs && out.decision.is_none() {
+            let start = out.pairs.len();
+            let res = run(&self.jobs_in(start..(start + batch).min(self.pairs)));
+            for p in &res {
+                out.penta.add(p.a_total());
+            }
+            out.pairs.extend(res);
+            let llr = sprt.llr(&out.penta);
+            out.llr.push(llr);
+            out.decision = sprt.decide(llr);
+        }
+        out
+    }
+}
+
+/// The outcome of [`HeadToHead::run_sprt`].
+#[derive(Clone, Debug)]
+pub struct SprtRun {
+    /// Every pair played, in pair order.
+    pub pairs: Vec<PairResult>,
+    pub penta: Pentanomial,
+    /// The cumulative LLR after each batch.
+    pub llr: Vec<f64>,
+    /// `None`: no bound crossed by the last pair.
+    pub decision: Option<Decision>,
 }
 
 /// Totals per bot, plus the pair-level counts for the sign test.
@@ -100,5 +138,32 @@ mod tests {
         assert_eq!(s.a.games, 4);
         assert_eq!(s.a.wins + s.b.wins + s.a.draws, 4);
         assert_eq!(s.pairs_a + s.pairs_b + s.pairs_tied, 2);
+    }
+
+    #[test]
+    fn sprt_plays_a_prefix_of_the_fixed_match_in_whole_batches() {
+        let opts = SearchOptions { width: 4, ..Default::default() };
+        let h = HeadToHead {
+            a: BotSpec::hand(weights::preset("default").unwrap(), opts),
+            b: BotSpec::hand(weights::preset("steady").unwrap(), opts),
+            pairs: 5,
+            seed: 3,
+            speed: FixedSpeed { fpp: [24, 30], jitter: 1, max_pieces: 40 },
+            record: 0,
+        };
+        let key = |p: &PairResult| p.games.each_ref().map(|g| (g.seed, g.winner, g.frames));
+        let fixed: Vec<_> = h.run().iter().map(key).collect();
+        let lenient = Sprt::new(-1.0, 1.0, 1e-9, 1e-9).unwrap();
+        let strict = Sprt::new(-1000.0, 1000.0, 0.49, 0.49).unwrap();
+        for sprt in [lenient, strict] {
+            let r = h.run_sprt(&sprt, 2);
+            let k = r.pairs.len();
+            assert!(k == h.pairs || (k % 2 == 0 && r.decision.is_some()), "{k} {:?}", r.decision);
+            assert_eq!(r.llr.len(), k.div_ceil(2));
+            assert_eq!(r.decision, sprt.decide(*r.llr.last().unwrap()));
+            assert!(r.llr[..r.llr.len() - 1].iter().all(|&l| sprt.decide(l).is_none()));
+            assert_eq!(r.penta.pairs(), k as u64);
+            assert_eq!(r.pairs.iter().map(key).collect::<Vec<_>>(), fixed[..k]);
+        }
     }
 }

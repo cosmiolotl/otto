@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 FEATURE_SET = "rows-v1"
+# `rows-v1` plus the side to move's release-controller plan (features.rs `Layout::RowsV1Plan`): the same
+# indices, then `plan_mode`, `plan_opp_burst`, `plan_opp_fill` appended. The trainer takes the layout from
+# the data (`STEM.json`); every data set of one run must share it, and the exported net carries its hash.
+FEATURE_SETS = (FEATURE_SET, "rows-v1-plan")
 
 # Architecture (net.rs). L1, the accumulator width, is per network: L1 is the default (v1, v2), and any
 # multiple of 128 up to L1_MAX is supported (`supported_l1`).
@@ -58,6 +62,7 @@ class Layout:
     n_features: int
     max_active: int
     blocks: dict[str, Block]  # in offset order
+    feature_set: str = FEATURE_SET
 
     @property
     def hash(self) -> int:
@@ -65,8 +70,8 @@ class Layout:
 
     @staticmethod
     def from_json(j: dict) -> "Layout":
-        if j["feature_set"] != FEATURE_SET:
-            raise ValueError(f"feature set {j['feature_set']!r}, trainer expects {FEATURE_SET!r}")
+        if j["feature_set"] not in FEATURE_SETS:
+            raise ValueError(f"feature set {j['feature_set']!r}, trainer knows {FEATURE_SETS}")
         blocks = {b["name"]: Block(b["name"], b["offset"], tuple(b["dims"])) for b in j["blocks"]}
         off = 0
         for b in blocks.values():
@@ -80,7 +85,7 @@ class Layout:
             raise ValueError(f"max_active {j['max_active']} can overflow the int16 accumulator at these clamps")
         # Rust's `layout_json` is compact with keys in this order; re-serialising reproduces it.
         raw = json.dumps(j, separators=(",", ":"))
-        return Layout(raw, j["n_features"], j["max_active"], blocks)
+        return Layout(raw, j["n_features"], j["max_active"], blocks, j["feature_set"])
 
 
 def read_header(stem: str | Path) -> tuple[dict, Layout]:
