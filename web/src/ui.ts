@@ -191,8 +191,6 @@ export class SettingsPanel {
   private deviceText = el('span');
   private warning = el('div', 'warning');
   private warningText = el('span');
-  private footText = el('span');
-  private footDot = el('span', 'dot');
   private handlingInputs: { key: keyof typeof HANDLING; input: HTMLInputElement; value: HTMLElement }[] = [];
   private controlRows = new Map<Action, HTMLButtonElement>();
   private listening: Action | null = null;
@@ -220,10 +218,10 @@ export class SettingsPanel {
     return true;
   }
 
-  setDevice(limitPps: number | null, msPerMove: number | null): void {
+  setDevice(limitPps: number | null, _mspm: number | null): void {
     this.deviceLimit = limitPps;
     if (limitPps === null) {
-      this.deviceText.replaceChildren('Measuring this device…');
+      this.deviceText.replaceChildren('Measuring this device...');
     } else {
       const b = el('b', '', `${limitPps.toFixed(1)} pps`);
       this.deviceText.replaceChildren('This device keeps up to about ', b);
