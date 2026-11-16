@@ -18,8 +18,14 @@ use wasm_bindgen::prelude::*;
 /// Rows sent to the renderer (20 visible + 4 of the buffer zone, where spawns and clutch happen).
 pub const RENDER_ROWS: usize = 24;
 
-/// Cell codes of [`Game::board`]: 0 empty, 1..=7 a piece (`Piece` index + 1), 8 garbage.
+/// Cell codes of [`Game::board`]: the low nibble is 0 empty, 1..=7 a piece (`Piece` index + 1), 8 garbage;
+/// the high nibble holds links to orthogonal neighbours from the same placed piece ([`UP`], [`RIGHT`],
+/// [`DOWN`], [`LEFT`]), so the renderer can draw connected textures.
 const GARBAGE: u8 = 8;
+const UP: u8 = 0x10;
+const RIGHT: u8 = 0x20;
+const DOWN: u8 = 0x40;
+const LEFT: u8 = 0x80;
 
 /// Event kinds in the log; each event is three `u32`s: `[frame, kind, arg]`.
 const EV_KEY: u32 = 0;
@@ -34,14 +40,29 @@ struct Colors([[u8; BOARD_WIDTH]; BOARD_HEIGHT]);
 
 impl LockObserver for Colors {
     fn placed(&mut self, piece: Piece, cells: &[(i8, i8); 4]) {
+        let inside = |(x, y): (i8, i8)| (0..BOARD_WIDTH as i8).contains(&x) && (0..BOARD_HEIGHT as i8).contains(&y);
         for &(x, y) in cells {
-            if (0..BOARD_WIDTH as i8).contains(&x) && (0..BOARD_HEIGHT as i8).contains(&y) {
-                self.0[y as usize][x as usize] = piece.index() as u8 + 1;
+            if !inside((x, y)) {
+                continue;
             }
+            let mut code = piece.index() as u8 + 1;
+            for (dx, dy, bit) in [(0, 1, UP), (1, 0, RIGHT), (0, -1, DOWN), (-1, 0, LEFT)] {
+                let n = (x + dx, y + dy);
+                if inside(n) && cells.contains(&n) {
+                    code |= bit;
+                }
+            }
+            self.0[y as usize][x as usize] = code;
         }
     }
 
     fn cleared(&mut self, mask: u64) {
+        // Cut links into cleared rows; the rows that become adjacent were never connected.
+        for r in 0..BOARD_HEIGHT {
+            if mask >> r & 1 != 0 {
+                self.cut(r);
+            }
+        }
         let mut w = 0;
         for r in 0..BOARD_HEIGHT {
             if mask >> r & 1 == 0 {
@@ -56,6 +77,7 @@ impl LockObserver for Colors {
 
     fn garbage_line(&mut self, column: u8, _cid: u32) {
         // Same row-37 quirk as `Board::insert_garbage`.
+        self.cut(37);
         let (r38, r39) = (self.0[38], self.0[39]);
         self.0.copy_within(0..37, 1);
         let mut row = [GARBAGE; BOARD_WIDTH];
@@ -63,6 +85,18 @@ impl LockObserver for Colors {
         self.0[0] = row;
         self.0[38] = r38;
         self.0[39] = r39;
+    }
+}
+
+impl Colors {
+    /// Drop the links of the rows above and below `r` that point into it.
+    fn cut(&mut self, r: usize) {
+        if r > 0 {
+            self.0[r - 1].iter_mut().for_each(|c| *c &= !UP);
+        }
+        if r + 1 < BOARD_HEIGHT {
+            self.0[r + 1].iter_mut().for_each(|c| *c &= !DOWN);
+        }
     }
 }
 
@@ -346,7 +380,7 @@ impl Game {
 
 /// Otto's weights: `mean-0511`, the final mean of the M5 CMA-ES tune (generation 511,
 /// `runs/aws/runs/m5/mean.json`).
-const WEIGHTS: &str = include_str!("../../../weights/mean-0511.json");
+const WEIGHTS: &str = include_str!("../../../weights.json");
 
 /// Otto's search: the "d10" configuration, 6 beam plies (current + preview) plus 4 greedy plies on a
 /// sampled bag-consistent continuation (`bot-vs-bot --extra 4`, K = 1).
@@ -369,7 +403,7 @@ impl Brain {
             continuations: CONTINUATIONS,
             ..SearchOptions::default()
         };
-        let w: tetris_bot::Weights = serde_json::from_str(WEIGHTS).expect("weights/mean-0511.json");
+        let w: tetris_bot::Weights = serde_json::from_str(WEIGHTS).expect("weights.json");
         Brain { bot: Bot::new(w, opts, seed as u64) }
     }
 

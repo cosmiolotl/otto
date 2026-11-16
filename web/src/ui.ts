@@ -228,9 +228,6 @@ export class SettingsPanel {
       const b = el('b', '', `${limitPps.toFixed(1)} pps`);
       this.deviceText.replaceChildren('This device keeps up to about ', b);
     }
-    this.footDot.classList.toggle('live', msPerMove !== null);
-    this.footText.textContent =
-      msPerMove === null ? 'otto.wasm · loading' : `otto.wasm · local worker · ${msPerMove.toFixed(1)} ms/move`;
     this.syncWarning();
   }
 
@@ -303,12 +300,8 @@ export class SettingsPanel {
       controls.append(row);
       this.controlRows.set(a.id, btn);
     }
-    controls.append(el('div', 'hint-text', 'Click a key to rebind it. Esc cancels.'));
 
-    const foot = el('div', 'settings-foot');
-    foot.append(this.footDot, this.footText);
-
-    this.root.append(head, speed, handling, controls, foot);
+    this.root.append(head, speed, handling, controls);
   }
 
   private sync(): void {

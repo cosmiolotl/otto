@@ -696,17 +696,6 @@ input[type='range'].quiet::-webkit-slider-thumb {
   padding-top: 8px;
 }
 
-.settings-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-subtle);
-}
-
 .dot {
   width: 6px;
   height: 6px;
